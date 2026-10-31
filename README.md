@@ -2,7 +2,7 @@
   <img src="assets/brand/couchlink-lockup-on-dark.png" alt="Couchlink" width="420">
 </p>
 
-<p align="center"><b>The couch co-op launcher for PC, and a couch co-op SDK for developers.</b></p>
+<p align="center"><b>The ultimate couch co-op launcher (and screen manager) for PC, and a couch co-op SDK for developers.</b></p>
 
 <p align="center">
 <a href="https://github.com/cranebeaker/couchlink/releases">Download</a> ·
