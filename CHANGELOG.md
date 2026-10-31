@@ -19,6 +19,12 @@ What changed in each Couchlink release. Downloads and older notes are on the
   change a game's settings. Turn it off in Settings if you prefer. Takes effect from the next start.
 - **Take every keyboard and mouse.** A new shortcut (Ctrl+Shift+K by default, changeable or off in Settings) hands
   every keyboard and mouse to the game under the pointer. Press it again to give them back to their players.
+- **Start without the recipe.** Every game with a recipe now also offers a plain split screen: the game's own program,
+  one copy per player in borderless windows, without the recipe's mods or setup. Use it with another co-op mod you
+  installed yourself (for example a different New Vegas co-op mod), or to play split screen without one. It works
+  before the recipe's setup is done too.
+- **Nitrox finds more installs.** The Subnautica (Nitrox) recipe looks in more folders, and when it cannot find
+  Nitrox it says where to unzip it and to point it at the same Subnautica folder.
 - **Make your own recipe.** A new tab under "Find more" has a prompt to copy into an AI coding agent. It has the agent
   look at the game on your PC, write a recipe for it and check it, in the folder Couchlink reads recipes from.
 
