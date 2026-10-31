@@ -56,7 +56,7 @@ Try it: put the file in `%LOCALAPPDATA%\Couchlink\recipes\` and it shows up in t
 parser before sharing:
 
 ```
-cargo run -q -p couchlink-nucleus --example check_recipe -- my-game.json
+cargo run -q -p couchlink-core --example check_recipe -- my-game.json
 ```
 
 Then share it in the Co-op Anything Discord. Published recipes are signed and reach every Couchlink install without an

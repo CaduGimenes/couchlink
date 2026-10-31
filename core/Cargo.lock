@@ -131,15 +131,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "couchlink-nucleus"
-version = "0.1.9"
-dependencies = [
- "couchlink-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "couchlink-sign"
 version = "0.1.9"
 dependencies = [
