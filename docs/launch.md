@@ -11,7 +11,6 @@ contract between their parts. Protocol additions go in `docs/protocol.md` once b
 | Session runner | `core/crates/couchlinkd/src/session/` (+ types in `couchlink-core/src/session.rs`, `recipe.rs`) | recipes, game discovery, preparing copies, launching, window placement, journal + restore, protocol commands and events |
 | Steam layer | `core/crates/couchlink-steam/` (library crate) | Steam library scan, the Steam "ladder" below, Goldberg (gbe_fork) download and per-seat setup, restore |
 | Input hook | `hook/` (C++, ProtoInput fork, MIT) + `core/crates/couchlink-hook/` (Rust injector + config pipe) | injecting into each copy, giving it one controller, faking focus, renaming single-instance locks, copy-on-write for linked files, per-seat save folders |
-| SplitScreen.Me importer | `core/crates/couchlink-nucleus/` (pure: hub JSON in, draft recipe JSON out) | mapping handler data to draft recipes; couchlinkd does the HTTP fetch at integration |
 
 Each part owns only its own crate or folder. Only the session runner edits `couchlinkd` and `couchlink-core`; the others
 are wired in afterwards. The workspace uses `members = ["crates/*"]`, so nobody edits the root Cargo.toml.
@@ -75,7 +74,7 @@ file's path and `user_message()` explains it. Couchlink never changes antivirus 
 
 ## Recipe (`couchlink.json`)
 
-Data only. Built-ins live in `recipes/`; imported ones (SplitScreen.Me) and user ones in `<state>/recipes/`.
+Data only. Built-ins live in `recipes/`; user ones in `<state>/recipes/`.
 
 ```json
 {
@@ -263,8 +262,6 @@ Steps per seat: `copy`, `steam`, `launch`, `hook`, `place`, `running`, `exited`.
 - Input hook exposes (Rust) `couchlink_hook::launch_suspended(exe, args, env, cwd) -> Result<Launched>`,
   `inject(&Launched, &HookConfig) -> Result<HookHandle>`, `resume(&Launched)`, where
   `HookConfig { pad: Option<u32>, focus: bool, locks: Vec<String>, cow_root: Option<PathBuf>, saves: Vec<(PathBuf, PathBuf)> }`.
-- Importer exposes `couchlink_nucleus::to_recipe(handler_json: &str) -> Result<Draft>` with `Draft { recipe: serde_json::Value, notes: Vec<String>, confidence }`
-  and `list(allhandlers_json: &str) -> Vec<HubGame>`.
 - The journal itself (`couchlink-core/src/journal.rs`) is owned by the session runner.
 
 ## Live recipes (signed, from coopanything.app)

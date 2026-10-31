@@ -55,6 +55,16 @@ https://github.com/TsudaKageyu/minhook, commit 8af6b4acae5a9388fd742b56fa79ece89
 Engine by Vyacheslav Patkov). Copyright (C) 2009-2017 Tsuda Kageyu, all rights reserved; the full license text is in
 `third_party/minhook/LICENSE.txt` and must stay with any binary or source distribution.
 
+## Goldberg Steam Emulator and gbe_fork (LGPL-3.0)
+
+https://github.com/Detanup01/gbe_fork, release `release-2026_09_27`, a maintained fork of the Goldberg Steam Emulator by
+Mr. Goldberg (https://gitlab.com/Mr_Goldberg/goldberg_emulator). It gives each copy of a Steam game its own stand-in
+Steam player (`core/crates/couchlink-steam/`). Couchlink does not include or change its code: the first time a
+recipe needs it, couchlinkd downloads that pinned release from GitHub, checks it against a fixed SHA-256 and places the
+unmodified DLLs next to each player's copy of the game. Nothing in Couchlink links against it. Thanks to Mr. Goldberg
+and the gbe_fork maintainers and contributors. The full license text is in
+`core/crates/couchlink-steam/assets/gbe_fork-LICENSE-LGPL-3.0.txt`.
+
 ## Virtual Display Driver (MIT)
 
 https://github.com/VirtualDrivers/Virtual-Display-Driver, release 25.7.23 (`VirtualDisplayDriver-x86.Driver.Only.zip`).

@@ -1,6 +1,6 @@
 //! Checks recipe files against the runner's own parser.
 //!
-//! cargo run -q -p couchlink-nucleus --example check_recipe -- <file.json>...
+//! cargo run -q -p couchlink-core --example check_recipe -- <file.json>...
 //!
 //! A file may hold a bare recipe or `{"recipe": {...}, ...}`. Prints OK or the error per file and exits
 //! non-zero if any failed.
