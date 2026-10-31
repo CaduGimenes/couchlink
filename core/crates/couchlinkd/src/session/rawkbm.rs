@@ -1347,6 +1347,8 @@ mod tests {
         Some(Pointer { pid: POINTER_PID.load(std::sync::atomic::Ordering::Relaxed), x: 100, y: 50, w: 800, h: 600 })
     }
 
+    // Needs the feed, which is Windows only (as above).
+    #[cfg(windows)]
     #[test]
     fn host_control_sends_spare_and_taken_input_to_the_copy_under_the_pointer() {
         use std::sync::atomic::Ordering::Relaxed;
