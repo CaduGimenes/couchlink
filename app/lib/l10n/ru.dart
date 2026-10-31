@@ -442,5 +442,9 @@ const Map<String, String> ruStrings = {
   'Couchlink could not find this game on this PC. Install it with Steam, then check again.': 'Couchlink не нашёл эту игру на этом ПК. Установите её через Steam и проверьте снова.',
   'Couchlink could not find this game on this PC. Install it, then check again.': 'Couchlink не нашёл эту игру на этом ПК. Установите её и проверьте снова.',
   'Before your first game': 'Перед первой игрой',
+  'Plain split screen': 'Простой разделённый экран',
+  'Start without the recipe': 'Запустить без рецепта',
+  'Starts the game’s own program, one copy per player, without this recipe’s mods or setup. Use it with another co-op mod you installed yourself, or to play split screen without one.':
+      'Запускает обычную программу игры, по копии на каждого игрока, без модов и настройки этого рецепта. Подходит для другого кооп-мода, который вы поставили сами, или для разделённого экрана без мода.',
   'Only once: Couchlink remembers it for every game after this.': 'Только один раз: дальше Couchlink это помнит.',
 };

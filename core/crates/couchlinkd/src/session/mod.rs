@@ -212,14 +212,15 @@ impl Config {
     /// `list_games`: every recipe with whether and where the game is installed, plus recipe files that did not load.
     pub fn list_games(&self) -> (Vec<GameInfo>, Vec<recipes::LoadError>) {
         let loaded = self.load();
-        let games = loaded.recipes.iter().map(|r| recipes::game_info(&self.deps.locators, r)).collect();
+        let games = loaded.recipes.iter().map(|r| recipes::game_info(&self.deps.locators, &self.state_dir, r)).collect();
         (games, loaded.errors)
     }
 
     /// Check that a session can start now and work out what it will launch. The error is the text
     /// `start_session` replies with. `dev` lets a screen on a display that is not connected use a
-    /// 1920x1080 stand-in (for tests on a locked PC).
-    pub fn plan(&self, state: &State, recipe_id: &str, dev: bool, options: &BTreeMap<String, String>) -> Result<Plan, String> {
+    /// 1920x1080 stand-in (for tests on a locked PC). `plain` starts a game that has a recipe the way "Try it" starts
+    /// one without: its own program, a copy per player, and nothing the recipe asks for (`requires`, `edits`, helpers).
+    pub fn plan(&self, state: &State, recipe_id: &str, dev: bool, options: &BTreeMap<String, String>, plain: bool) -> Result<Plan, String> {
         let loaded = self.load();
         let Some(recipe) = loaded.recipes.into_iter().find(|r| r.id == recipe_id) else {
             let broken = loaded.errors.iter().find(|(f, _)| f.trim_end_matches(".json") == recipe_id);
@@ -230,11 +231,21 @@ impl Config {
         };
         let game_dir = recipes::locate(&self.deps.locators, &recipe)
             .ok_or_else(|| format!("{} is not installed, or Couchlink cannot find it (add its folder to games.json in the state folder)", recipe.game))?;
+        if plain {
+            let recipe = recipes::plain_recipe(&recipe, &game_dir).ok_or_else(|| format!("no program to start was found in the folder of {} ({})", recipe.game, game_dir.display()))?;
+            let seats = plan_seats(state, &recipe, dev)?;
+            let fps_limit = (state.fps_limit > 0).then_some(state.fps_limit);
+            return Ok(Plan { recipe, game_dir, seats, state_dir: self.state_dir.clone(), options: BTreeMap::new(), fps_limit });
+        }
+        // The helpers the recipe looks for come first: their step is the one the player is most likely missing.
+        let mut recipe = recipe;
+        let found = recipes::resolve_finds(&self.state_dir, &recipe)?;
         if let Some(r) = recipe.requires.iter().find(|r| !recipes::require_met(&game_dir, r)) {
             return Err(format!("{}: {}", recipe.game, r.hint));
         }
-        let mut recipe = recipe;
-        let found = recipes::resolve_finds(&self.state_dir, &recipe)?;
+        if !recipes::launch_exe_present(&game_dir, &recipe) {
+            return Err(format!("{}: {} is not in the game folder ({}). Install what the recipe needs, or start without the recipe", recipe.game, recipe.launch.exe, game_dir.display()));
+        }
         recipe.vars.extend(found);
         // games.json can also change a recipe's own settings, such as which Nitrox world to host.
         for (name, value) in recipes::games_json_vars(&self.state_dir, &recipe.id) {
@@ -327,4 +338,134 @@ pub fn spawn_recover(config: Config, report: Report) -> Result<Handle, String> {
 pub fn journal_pending(state_dir: &Path) -> bool {
     let (journal, _) = Journal::open(&state_dir.join("journal.json"));
     !journal.is_empty()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("couchlinkd-plain-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// The built-in recipes, a state folder whose games.json points `recipe` at `game`, and no store scans.
+    fn config(tag: &str, recipe: &str, game: &Path) -> Config {
+        // SAFETY: tests that read this variable all want it off.
+        unsafe { std::env::set_var("COUCHLINK_TRY_GAMES", "0") };
+        let state = temp(&format!("{tag}-state"));
+        std::fs::write(state.join("games.json"), serde_json::json!({ recipe: game.display().to_string() }).to_string()).unwrap();
+        let builtin = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../recipes");
+        let deps = Deps { launcher: Arc::new(CommandLauncher), locators: vec![recipes::games_json_locator(state.clone())], undoers: Undoers::new(), prepare: None };
+        Config::new(Some(builtin), state, deps)
+    }
+
+    /// Two players side by side on a stand-in display.
+    fn two_players() -> State {
+        serde_json::from_value(serde_json::json!({
+            "devices": [], "displays": [], "layout": "auto", "dev": true,
+            "seats": [
+                { "name": "A", "color": "#0A84FF", "devices": ["pad:1"] },
+                { "name": "B", "color": "#FF9F0A", "devices": ["pad:2"] }
+            ],
+            "screens": [{ "display": "disp:1", "on": true, "seats": [0, 1], "regions": [[0.0, 0.0, 0.5, 1.0], [0.5, 0.0, 0.5, 1.0]] }]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn new_vegas_starts_plain_through_its_own_exe_with_another_mod_and_without_the_recipes_launcher() {
+        // The game with a co-op mod the player picked: no xNVSE loader, none of the recipe's files.
+        let game = temp("fnv-game");
+        std::fs::write(game.join("FalloutNV.exe"), b"MZ").unwrap();
+        std::fs::create_dir_all(game.join("Data/NVSE/Plugins")).unwrap();
+        std::fs::write(game.join("Data/NVSE/Plugins/other_coop.dll"), b"MZ").unwrap();
+        let cfg = config("fnv", "fallout-new-vegas-coop", &game);
+
+        let (games, _) = cfg.list_games();
+        let info = games.iter().find(|g| g.recipe == "fallout-new-vegas-coop").unwrap();
+        assert!(info.installed, "the folder holds the game's own exe, so it counts as installed without the recipe's launcher");
+        assert!(info.setup.iter().any(|s| !s.done), "the recipe's steps still show as not done");
+
+        // With the recipe the start is refused and says what is missing.
+        let err = cfg.plan(&two_players(), "fallout-new-vegas-coop", true, &BTreeMap::new(), false).err().expect("the recipe needs its mods");
+        assert!(err.contains("xNVSE"), "{err}");
+
+        // Plain: the game's own program, a copy per player, every single-instance lock lifted, none of the recipe.
+        let plan = cfg.plan(&two_players(), "fallout-new-vegas-coop", true, &BTreeMap::new(), true).expect("plain starts");
+        let r = &plan.recipe;
+        assert_eq!(r.id, "fallout-new-vegas-coop", "the session keeps the game's id");
+        assert_eq!(r.launch.exe, "FalloutNV.exe");
+        assert_eq!(r.locks, ["*"]);
+        assert!(r.requires.is_empty() && r.edits.is_empty() && r.find.is_empty() && r.launch.first.is_empty());
+        assert!(r.files.copy.is_empty() && r.files.saves.is_empty());
+        assert_eq!(r.mode, couchlink_core::recipe::Mode::Instances);
+        assert!(r.window.borderless && r.input.xinput);
+        assert_eq!(r.matching.steam_app_id, Some(22380));
+        assert_eq!(plan.seats.len(), 2);
+        assert_eq!(plan.game_dir, game);
+        let _ = std::fs::remove_dir_all(&game);
+        let _ = std::fs::remove_dir_all(&cfg.state_dir);
+    }
+
+    #[test]
+    fn plain_needs_the_game_installed() {
+        let game = temp("gone");
+        let cfg = config("gone", "fallout-new-vegas-coop", &game.join("nope"));
+        let err = cfg.plan(&two_players(), "fallout-new-vegas-coop", true, &BTreeMap::new(), true).err().unwrap();
+        assert!(err.contains("not installed"), "{err}");
+        let _ = std::fs::remove_dir_all(&game);
+        let _ = std::fs::remove_dir_all(&cfg.state_dir);
+    }
+
+    #[test]
+    fn a_helper_not_found_is_a_setup_step_and_the_start_says_the_same() {
+        let game = temp("helper-game");
+        std::fs::write(game.join("Game.exe"), b"MZ").unwrap();
+        let cfg = config("helper", "helped", &game);
+        // A recipe of the player's own that looks for a helper in an empty folder, and needs a file it puts in the game.
+        let near = temp("helper-near");
+        let recipe = serde_json::json!({
+            "schema": 1, "id": "helped", "game": "Helped", "players": [1, 4], "match": { "exe": "Game.exe" },
+            "launch": { "exe": "Game.exe", "env": { "HELPER": "$HELPER" } },
+            "find": { "HELPER": { "file": "Helper.exe", "near": [near.display().to_string()], "hint": "put Helper.exe in your Downloads folder." } },
+            "requires": [{ "file": "patched.txt", "hint": "run the helper once." }]
+        });
+        std::fs::create_dir_all(cfg.state_dir.join("recipes")).unwrap();
+        std::fs::write(cfg.state_dir.join("recipes/helped.json"), recipe.to_string()).unwrap();
+        let info = |cfg: &Config| cfg.list_games().0.into_iter().find(|g| g.recipe == "helped").unwrap();
+        let steps: Vec<_> = info(&cfg).setup.into_iter().map(|s| (s.text, s.done)).collect();
+        assert_eq!(steps, [("put Helper.exe in your Downloads folder.".to_string(), false), ("run the helper once.".to_string(), false)]);
+        let err = cfg.plan(&two_players(), "helped", true, &BTreeMap::new(), false).err().unwrap();
+        assert_eq!(err, "Helped: put Helper.exe in your Downloads folder.", "the helper's step comes first");
+
+        std::fs::write(near.join("Helper.exe"), b"MZ").unwrap();
+        assert!(info(&cfg).setup[0].done);
+        let err = cfg.plan(&two_players(), "helped", true, &BTreeMap::new(), false).err().unwrap();
+        assert_eq!(err, "Helped: run the helper once.");
+        std::fs::write(game.join("patched.txt"), b"").unwrap();
+        assert!(cfg.plan(&two_players(), "helped", true, &BTreeMap::new(), false).is_ok());
+        let _ = std::fs::remove_dir_all(&game);
+        let _ = std::fs::remove_dir_all(&near);
+        let _ = std::fs::remove_dir_all(&cfg.state_dir);
+    }
+
+    #[test]
+    fn subnautica_starts_plain_without_nitrox_and_its_nitrox_steps_say_what_to_do() {
+        let game = temp("subnautica");
+        std::fs::write(game.join("Subnautica.exe"), b"MZ").unwrap();
+        let cfg = config("nitrox", "subnautica-nitrox", &game);
+        let r = cfg.load().recipes.into_iter().find(|r| r.id == "subnautica-nitrox").unwrap();
+        let hint = r.find["NITROX"].hint.clone().expect("finding Nitrox is a setup step");
+        assert!(hint.contains("Nitrox.Launcher.exe") && hint.contains("Downloads") && hint.contains("games.json"), "{hint}");
+        assert!(r.requires[0].hint.contains("game path"), "says to check which game folder Nitrox patched");
+
+        let plan = cfg.plan(&two_players(), "subnautica-nitrox", true, &BTreeMap::new(), true).expect("plain starts");
+        assert_eq!(plan.recipe.launch.exe, "Subnautica.exe");
+        assert!(plan.recipe.registry.is_empty() && plan.recipe.launch.env.is_empty() && plan.recipe.launch.first.is_empty());
+        let _ = std::fs::remove_dir_all(&game);
+        let _ = std::fs::remove_dir_all(&cfg.state_dir);
+    }
 }

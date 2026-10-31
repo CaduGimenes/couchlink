@@ -239,6 +239,36 @@ void main() {
     });
   });
 
+  testWidgets('a recipe game can start as a plain split screen, even before its setup is done', (tester) async {
+    final fake = fastFake(games: const [
+      GameInfo(recipe: 'fallout-new-vegas-coop', game: 'Fallout: New Vegas', installed: true, path: 'C:/fnv', minPlayers: 2, maxPlayers: 2, setup: [SetupStep('install xNVSE')]),
+      GameInfo(recipe: 'try-steam-4000', game: "Garry's Mod", installed: true, path: 'C:/gm', minPlayers: 2, maxPlayers: 8, source: 'try'),
+    ]);
+    await pumpApp(tester, fake, view: AppView.library, size: const Size(1400, 1300));
+
+    await tester.tap(byKey('game-try-steam-4000'));
+    await settle(tester);
+    expect(byKey('sheet-plain'), findsNothing, reason: 'a Try it game already starts plain');
+    await tester.tap(byKey('sheet-close'));
+    await settle(tester);
+
+    await tester.tap(byKey('game-fallout-new-vegas-coop'));
+    await settle(tester);
+    expect(byKey('sheet-recheck'), findsOneWidget, reason: 'the recipe still waits for its setup');
+    expect(byKey('sheet-plain-title'), findsOneWidget);
+    await tester.ensureVisible(byKey('sheet-plain'));
+    await settle(tester);
+    await tester.tap(byKey('sheet-plain'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 30));
+    expect(fake.startedRecipes, ['fallout-new-vegas-coop']);
+    expect(fake.plainStarts, ['fallout-new-vegas-coop']);
+    expect(byKey('launch-card'), findsOneWidget);
+    expect(find.text('One-time setup first, then Play'), findsNothing);
+    await tester.tap(byKey('launch-cancel'), warnIfMissed: false);
+    await settle(tester, const Duration(seconds: 2));
+  });
+
   group('Play and the launch card', () {
     testWidgets('Play starts the session, the card follows the steps, Playing, End', (tester) async {
       final fake = fastFake();

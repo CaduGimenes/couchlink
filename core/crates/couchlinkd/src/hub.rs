@@ -674,7 +674,7 @@ impl Hub {
             Command::RemoveGame { recipe } => self.session.remove_game(&recipe).map(|_| none),
             Command::GamePrograms { recipe } => self.session.game_programs(&recipe),
             Command::SetGameProgram { recipe, exe } => self.session.set_game_program(&recipe, exe.as_deref()).map(|_| none),
-            Command::StartSession { recipe, options } => self.start_session(&recipe, &options),
+            Command::StartSession { recipe, options, plain } => self.start_session(&recipe, &options, plain),
             Command::StopSession => self.stop_session(),
             Command::SteamAccounts => Ok(crate::accounts::list()),
             Command::OpenSteamAccount { seat } => crate::accounts::open(seat).map(|_| none),
@@ -734,11 +734,11 @@ impl Hub {
 
     // ---- game sessions --------------------------------------------------------
 
-    fn start_session(&mut self, recipe: &str, options: &std::collections::BTreeMap<String, String>) -> Result<serde_json::Value, String> {
+    fn start_session(&mut self, recipe: &str, options: &std::collections::BTreeMap<String, String>, plain: bool) -> Result<serde_json::Value, String> {
         if self.session_info.active() || self.session_handle.is_some() {
             return Err("a game session is already running; stop it first".to_string());
         }
-        let plan = self.session.plan(&self.model.state(), recipe, self.model.dev(), options)?;
+        let plan = self.session.plan(&self.model.state(), recipe, self.model.dev(), options, plain)?;
         let tx = self.self_tx.clone();
         let report: session::Report = std::sync::Arc::new(move |info| {
             let _ = tx.send(HubMsg::Session(info));

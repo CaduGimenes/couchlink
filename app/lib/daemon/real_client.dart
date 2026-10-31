@@ -453,7 +453,7 @@ class DaemonClient extends CouchClient {
   }
 
   @override
-  Future<String?> startSession(String recipe) => _cmd('start_session', {'recipe': recipe});
+  Future<String?> startSession(String recipe, {bool plain = false}) => _cmd('start_session', {'recipe': recipe, if (plain) 'plain': true});
 
   @override
   Future<String?> stopSession() => _cmd('stop_session');

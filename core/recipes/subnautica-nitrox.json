@@ -34,11 +34,12 @@
   "find": {
     "NITROX": {
       "file": "Nitrox.Launcher.exe",
-      "near": ["$USERPROFILE/Downloads", "$USERPROFILE/Desktop", "$USERPROFILE/Documents", "$LOCALAPPDATA/Programs", "$USERPROFILE/Games"],
-      "depth": 2
+      "near": ["$USERPROFILE/Downloads", "$USERPROFILE/Desktop", "$USERPROFILE/Documents", "$LOCALAPPDATA/Programs", "$USERPROFILE/Games", "C:/Games", "D:/Games", "$USERPROFILE"],
+      "depth": 3,
+      "hint": "Couchlink could not find Nitrox (Nitrox.Launcher.exe). Unzip Nitrox into your Downloads, Desktop, Documents or Games folder (up to three folders down), or set NITROX to its folder for this game in games.json."
     }
   },
   "requires": [
-    { "file": "Subnautica_Data/Managed/Assembly-CSharp.dll", "contains": "NitroxPatcher", "hint": "open the Nitrox launcher and press Play Multiplayer once, then close the game. Nitrox installs itself into the game folder at that moment." }
+    { "file": "Subnautica_Data/Managed/Assembly-CSharp.dll", "contains": "NitroxPatcher", "hint": "Nitrox is not set up in this Subnautica folder yet. Open the Nitrox launcher, check in its settings that the game path is the same Subnautica folder Couchlink shows here, press Play Multiplayer once, then close the game. Nitrox installs itself into the game folder at that moment." }
   ]
 }

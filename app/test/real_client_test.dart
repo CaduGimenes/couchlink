@@ -270,6 +270,7 @@ void main() {
 
     expect(await c.startSession('testgame'), isNull);
     expect(d.received.lastWhere((m) => m['cmd'] == 'start_session')['recipe'], 'testgame');
+    expect(d.received.lastWhere((m) => m['cmd'] == 'start_session').containsKey('plain'), isFalse);
 
     d.emit({
       'event': 'session',
@@ -328,6 +329,8 @@ void main() {
     await c.start();
     await until(() => c.state != null);
     expect(await c.startSession('subnautica-nitrox'), 'open the Nitrox launcher and press Play Multiplayer once, then close the game.');
+    await c.startSession('subnautica-nitrox', plain: true);
+    expect(d.received.lastWhere((m) => m['cmd'] == 'start_session')['plain'], isTrue);
   });
 
   test('a session that exists at connect time arrives with the state', () async {

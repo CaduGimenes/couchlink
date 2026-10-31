@@ -260,6 +260,9 @@ pub struct Find {
     pub near: Vec<String>,
     #[serde(default = "default_find_depth")]
     pub depth: u8,
+    /// What the player does when it is not found, shown as a setup step in the Library.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
 }
 
 /// A file Couchlink fetches for a session (a mod the game needs): downloaded once from `url`, checked against `sha256`,

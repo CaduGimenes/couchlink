@@ -147,8 +147,9 @@ abstract class CouchClient extends ChangeNotifier {
   Future<({String? path, String? error})> saveReport();
 
   /// `start_session`: replies at once, then `session` events show the progress. Returns the
-  /// daemon's error text (already written for players), or null when the launch began.
-  Future<String?> startSession(String recipe);
+  /// daemon's error text (already written for players), or null when the launch began. [plain] starts the game
+  /// without its recipe: its own program, one copy per player, none of the recipe's mods or setup.
+  Future<String?> startSession(String recipe, {bool plain = false});
 
   /// `stop_session`: ends the session and undoes everything. `session` events follow.
   Future<String?> stopSession();
