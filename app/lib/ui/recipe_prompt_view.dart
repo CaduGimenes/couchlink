@@ -25,7 +25,7 @@ Couchlink (https://github.com/cranebeaker/couchlink) runs one copy of a game per
    - where it keeps saves and settings (so each player gets their own)
    - the mutex or event it uses to refuse a second copy, if it does
 3. Write the recipe to %LOCALAPPDATA%\\Couchlink\\recipes\\<game-id>.json. Keep it to what the format supports: data only, no scripts.
-4. Check it parses. With the Couchlink source: cargo run -q -p couchlink-nucleus --example check_recipe -- <file>. Otherwise re-read launch.md and check every field by hand.
+4. Check it parses. With the Couchlink source: cargo run -q -p couchlink-core --example check_recipe -- <file>. Otherwise re-read launch.md and check every field by hand.
 5. Tell me to open Couchlink: the game shows up in the Library. If it does not start right, read the copy logs in %LOCALAPPDATA%\\Couchlink\\logs and fix the recipe with me.
 
 When it works, I can share it in the Co-op Anything Discord so everyone gets it.''';
