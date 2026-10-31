@@ -79,6 +79,14 @@ pub enum Command {
         #[serde(default)]
         hide: Option<String>,
     },
+    /// Host control (keyboards and mice no player has control the game under the desktop pointer) and the keys that
+    /// hand every keyboard and mouse over; either may be left out to keep it.
+    SetHostControl {
+        #[serde(default)]
+        on: Option<bool>,
+        #[serde(default)]
+        keys: Option<String>,
+    },
     /// The close-the-games shortcut; either part may be left out to keep it.
     SetStopShortcut {
         #[serde(default)]
@@ -155,6 +163,9 @@ pub enum Command {
     RemoveSteamAccount {
         seat: usize,
     },
+    /// Virtual screens: whether the display driver is ready, and its one-time setup (one Windows prompt).
+    VirtualScreens,
+    SetupVirtualScreens,
 }
 
 impl Request {
@@ -495,7 +506,7 @@ mod tests {
         let s = &v["state"];
         let mut keys: Vec<_> = s.as_object().unwrap().keys().cloned().collect();
         keys.sort();
-        assert_eq!(keys, ["dev", "devices", "displays", "fps_limit", "front_keys", "hide_keys", "layout", "screens", "seats", "stop_keys", "stop_pad"]);
+        assert_eq!(keys, ["control_keys", "dev", "devices", "displays", "fps_limit", "front_keys", "hide_keys", "host_control", "layout", "screens", "seats", "stop_keys", "stop_pad"]);
         assert_eq!(s["layout"], "auto");
         assert_eq!(s["fps_limit"], 0);
         assert_eq!(s["dev"], false);
@@ -527,6 +538,8 @@ mod tests {
           "stop_pad": "back+start",
           "front_keys": "Ctrl+Shift+F",
           "hide_keys": "off",
+          "host_control": false,
+          "control_keys": "Ctrl+Shift+K",
           "dev": false
         }"##;
         let state: State = serde_json::from_str(text).unwrap();

@@ -235,6 +235,9 @@ fn launch_with_stand_in(
     let _ = std::fs::remove_file(&cfg_path);
     match connected {
         Ok(handle) => {
+            if let Some(k) = kbm.as_ref() {
+                super::rawkbm::add_pid(k.name(), launched.child.pid());
+            }
             launched.child = Box::new(Proxied { inner: launched.child, _handle: handle, _feed: feed.take(), _kbm: kbm.take() });
             launched.hooked = true;
             Ok(Some(launched))
@@ -272,6 +275,9 @@ fn launch_injected(
         held.terminate();
         format!("could not start {}: {e}", spec.exe.display())
     })?;
+    if let Some(k) = kbm.as_ref() {
+        super::rawkbm::add_pid(k.name(), held.pid());
+    }
     Ok(Launched { child: Box::new(Hooked { held, _handle: handle, _feed: feed, _kbm: kbm, job }), hooked: true })
 }
 
@@ -328,6 +334,9 @@ fn launch_as_seat_user(spec: &LaunchSpec, account: &couchlink_steam::AccountsCon
         }
     };
     let pid = launched.pid;
+    if let Some(k) = kbm.as_ref() {
+        super::rawkbm::add_pid(k.name(), pid);
+    }
     let connected = couchlink_hook::HookHandle::connect(pid, STANDIN_WAIT);
     let _ = std::fs::remove_file(&cfg_path);
     let child = AsUser::new(launched, None, feed, kbm);

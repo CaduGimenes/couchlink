@@ -16,10 +16,12 @@ pub enum Action {
     Front,
     /// Hide the game windows (back to the desktop).
     Hide,
+    /// Hand every keyboard and mouse to the game under the desktop pointer, or give them back.
+    Control,
 }
 
 impl Action {
-    pub const ALL: [Action; 3] = [Action::Stop, Action::Front, Action::Hide];
+    pub const ALL: [Action; 4] = [Action::Stop, Action::Front, Action::Hide, Action::Control];
 
     fn index(self) -> usize {
         self as usize
@@ -31,6 +33,7 @@ impl Action {
             Action::Stop => HubMsg::StopShortcut,
             Action::Front => HubMsg::WindowsShortcut(true),
             Action::Hide => HubMsg::WindowsShortcut(false),
+            Action::Control => HubMsg::ControlShortcut,
         }
     }
 }
@@ -114,7 +117,7 @@ pub mod linux {
     }
 
     /// The keys of each shortcut, by `Action::index`.
-    static WANTED: Mutex<[Option<Wanted>; 3]> = Mutex::new([None, None, None]);
+    static WANTED: Mutex<[Option<Wanted>; Action::ALL.len()]> = Mutex::new([const { None }; Action::ALL.len()]);
 
     pub(super) fn set(action: Action, keys: Option<KeyCombo>, tx: &UnboundedSender<HubMsg>) -> Result<(), String> {
         let wanted = match keys {
@@ -209,7 +212,7 @@ mod win {
                     // SAFETY: plain Win32 calls on this thread's own message queue; `msg` is a valid out buffer.
                     unsafe { PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_NOREMOVE) }; // makes the queue
                     let _ = id_tx.send(unsafe { GetCurrentThreadId() });
-                    let mut registered = [false; 3];
+                    let mut registered = [false; Action::ALL.len()];
                     while unsafe { GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) } > 0 {
                         match msg.message {
                             WM_HOTKEY => {
@@ -258,6 +261,19 @@ mod win {
             // SAFETY: posting a message to a thread id this module created.
             unsafe { PostThreadMessageW(self.id, WM_SET, 0, 0) };
             reply_rx.recv_timeout(std::time::Duration::from_secs(2)).map_err(|_| "the hotkey thread did not answer".to_string())?
+        }
+    }
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn every_shortcut_can_be_set_and_turned_off() {
+            let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+            let t = Thread::spawn(tx);
+            for action in Action::ALL {
+                assert_eq!(t.set(action, None), Ok(()), "{action:?}");
+            }
         }
     }
 }

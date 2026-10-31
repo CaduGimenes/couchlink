@@ -112,6 +112,12 @@ pub struct State {
     pub front_keys: String,
     #[serde(default = "default_hide_keys")]
     pub hide_keys: String,
+    /// Host control (`set_host_control`): keyboards and mice no player has control the game under the desktop pointer.
+    #[serde(default = "default_true")]
+    pub host_control: bool,
+    /// The keys that hand every keyboard and mouse to the game under the pointer and back, `off` when off.
+    #[serde(default = "default_control_keys")]
+    pub control_keys: String,
     pub dev: bool,
 }
 
@@ -121,6 +127,14 @@ fn default_front_keys() -> String {
 
 fn default_hide_keys() -> String {
     crate::shortcut::DEFAULT_HIDE_KEYS.to_string()
+}
+
+fn default_control_keys() -> String {
+    crate::shortcut::DEFAULT_CONTROL_KEYS.to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_stop_keys() -> String {

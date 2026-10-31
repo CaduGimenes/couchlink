@@ -18,6 +18,8 @@ pub struct Model {
     stop_pad: String,
     front_keys: String,
     hide_keys: String,
+    host_control: bool,
+    control_keys: String,
     dev: bool,
 }
 
@@ -40,7 +42,7 @@ impl Model {
             charging: false,
             seat: None,
         });
-        Model { seats, displays: Vec::new(), used_overrides: HashMap::new(), layout: Layout::Auto, screens: Vec::new(), fps_limit: 0, stop_keys: crate::shortcut::DEFAULT_KEYS.to_string(), stop_pad: crate::shortcut::DEFAULT_PAD.to_string(), front_keys: crate::shortcut::DEFAULT_FRONT_KEYS.to_string(), hide_keys: crate::shortcut::DEFAULT_HIDE_KEYS.to_string(), dev }
+        Model { seats, displays: Vec::new(), used_overrides: HashMap::new(), layout: Layout::Auto, screens: Vec::new(), fps_limit: 0, stop_keys: crate::shortcut::DEFAULT_KEYS.to_string(), stop_pad: crate::shortcut::DEFAULT_PAD.to_string(), front_keys: crate::shortcut::DEFAULT_FRONT_KEYS.to_string(), hide_keys: crate::shortcut::DEFAULT_HIDE_KEYS.to_string(), host_control: true, control_keys: crate::shortcut::DEFAULT_CONTROL_KEYS.to_string(), dev }
     }
 
     pub fn dev(&self) -> bool {
@@ -102,6 +104,27 @@ impl Model {
             self.hide_keys = h;
         }
         Ok(before != (self.front_keys.clone(), self.hide_keys.clone()))
+    }
+
+    /// Host control on or off, and its takeover keys (`Ctrl+Shift+K`, or `off`). True when either changed.
+    pub fn set_host_control(&mut self, on: Option<bool>, keys: Option<&str>) -> Result<bool, String> {
+        let keys = keys.map(|k| -> Result<String, String> { Ok(crate::shortcut::parse_keys(k)?.map_or_else(|| "off".to_string(), |c| c.label())) }).transpose()?;
+        let before = (self.host_control, self.control_keys.clone());
+        if let Some(on) = on {
+            self.host_control = on;
+        }
+        if let Some(k) = keys {
+            self.control_keys = k;
+        }
+        Ok(before != (self.host_control, self.control_keys.clone()))
+    }
+
+    pub fn host_control(&self) -> bool {
+        self.host_control
+    }
+
+    pub fn control_keys(&self) -> &str {
+        &self.control_keys
     }
 
     pub fn front_keys(&self) -> &str {
@@ -203,6 +226,8 @@ impl Model {
             stop_pad: self.stop_pad.clone(),
             front_keys: self.front_keys.clone(),
             hide_keys: self.hide_keys.clone(),
+            host_control: self.host_control,
+            control_keys: self.control_keys.clone(),
             dev: self.dev,
         }
     }

@@ -33,12 +33,14 @@ pub mod sandbox_linux;
 #[cfg(target_os = "linux")]
 pub mod uipad_linux;
 pub mod padfeed;
+pub mod present;
 pub mod rawkbm;
 pub mod recipes;
 pub mod remote;
 mod steam;
 pub mod stores;
 mod run;
+pub mod vscreens;
 pub mod window;
 
 pub use launch::{Child, CommandLauncher, LaunchSpec, Launched, Launcher};
@@ -111,6 +113,7 @@ impl Deps {
             undoers: {
                 let undoers = steam::undoers();
                 hook::register_undoers(&undoers);
+                vscreens::register_undoers(&undoers);
                 undoers
             },
             prepare: Some(Arc::new(steam::SteamPrepare)),

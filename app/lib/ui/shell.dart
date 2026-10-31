@@ -23,6 +23,7 @@ import 'launch_card.dart';
 import 'library_games.dart';
 import 'library_view.dart';
 import 'players_view.dart';
+import 'recipe_prompt_view.dart';
 import 'sample_data.dart';
 import 'screens_view.dart';
 import 'status.dart';
@@ -163,6 +164,7 @@ class _MainPane extends StatelessWidget {
                           AppView.players => ui.controlsSeat == null ? const PlayersView() : ControlsView(seat: ui.controlsSeat!),
                           AppView.screens => const ScreensView(),
                           AppView.discover => const DiscoverView(),
+                          AppView.recipe => const RecipePromptView(),
                           AppView.dev => const DevView(),
                         },
                       ),
@@ -357,6 +359,8 @@ class Sidebar extends StatelessWidget {
                       item(AppView.screens, iconScreens, t('Screens'), step: '3'),
                       _SideHeading(t('Find more')),
                       item(AppView.discover, iconDiscover, t('Co-op Anything')),
+                      const SizedBox(height: 2),
+                      item(AppView.recipe, iconSparkles, t('Make your own recipe')),
                       const SizedBox(height: 2),
                       item(AppView.dev, iconCode, t('Add your game')),
                     ],
@@ -657,6 +661,25 @@ class _BindingsTab extends StatelessWidget {
           _KeyBinding(id: 'stop', label: 'Close the games', keys: st.stopKeys, onSet: (k) => client.setStopShortcut(keys: k)),
           _KeyBinding(id: 'front', label: 'Keep the games on top (on and off)', keys: st.frontKeys, onSet: (k) => client.setWindowKeys(front: k)),
           _KeyBinding(id: 'hide', label: 'Hide the games', keys: st.hideKeys, onSet: (k) => client.setWindowKeys(hide: k)),
+          _KeyBinding(id: 'control', label: 'Take every keyboard and mouse (on and off)', keys: st.controlKeys, onSet: (k) => client.setHostControl(keys: k)),
+          Text(
+            t('Point at a game with the mouse to use it, for example to change its settings. Press the keys again to give the keyboards and mice back to their players.'),
+            style: txt(context, size: 11, color: c.ink3, height: 1.35),
+          ),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(child: Text(t('Spare keyboards and mice control the game under the pointer'), style: txt(context, size: 12, weight: FontWeight.w600, color: c.ink2))),
+            Switch(
+              key: const ValueKey('host-control'),
+              value: st.hostControl,
+              onChanged: (on) => runCmd(context, () => client.setHostControl(on: on)),
+            ),
+          ]),
+          Text(
+            t('A keyboard or mouse no player has works in whichever game the pointer is over. Takes effect from the next start.'),
+            style: txt(context, size: 11, color: c.ink3, height: 1.35),
+          ),
+          const SizedBox(height: 12),
           const SizedBox(height: 4),
           Text(t('Close the games with a controller (hold both)'), style: txt(context, size: 12, weight: FontWeight.w600, color: c.ink2)),
           const SizedBox(height: 6),

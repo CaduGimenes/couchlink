@@ -8,6 +8,8 @@ pub const DEFAULT_PAD: &str = "guide+back";
 /// Bring the game windows to the front, and hide them (back to the desktop).
 pub const DEFAULT_FRONT_KEYS: &str = "Ctrl+Shift+F";
 pub const DEFAULT_HIDE_KEYS: &str = "Ctrl+Shift+H";
+/// Hand every keyboard and mouse to the game under the desktop pointer, and give them back.
+pub const DEFAULT_CONTROL_KEYS: &str = "Ctrl+Shift+K";
 /// The pad choices Settings offers; `off` turns the pad shortcut off.
 pub const PAD_CHOICES: [&str; 4] = ["guide+back", "guide+start", "back+start", "off"];
 /// How long the pad buttons are held together before the games close.

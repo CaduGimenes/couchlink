@@ -90,12 +90,16 @@ pub enum HubMsg {
     StopShortcut,
     /// The keys that bring the game windows to the front (true) or hide them were pressed.
     WindowsShortcut(bool),
+    /// The keys that hand every keyboard and mouse to the game under the pointer (and back) were pressed.
+    ControlShortcut,
     /// `check_update` finished.
     UpdateChecked(Result<Option<crate::update::Available>, String>),
     /// `install_update` finished staging (the updater runs) or failed.
     UpdateStaged(Result<(), String>),
     /// A seat's own Steam account step finished (setup or removal), with its outcome for the log.
     SteamAccountDone { seat: usize, step: &'static str, result: Result<(), String> },
+    /// The display driver setup for virtual screens finished (`vscreen_setup.rs`).
+    VirtualScreensDone(Result<(), String>),
 }
 
 struct Client {
@@ -173,6 +177,8 @@ impl Hub {
                 let _ = m.set_fps_limit(settings["fps_limit"].as_u64().map_or(0, |f| f as u32));
                 let _ = m.set_stop_shortcut(settings["stop_keys"].as_str(), settings["stop_pad"].as_str());
                 let _ = m.set_window_keys(settings["front_keys"].as_str(), settings["hide_keys"].as_str());
+                let _ = m.set_host_control(settings["host_control"].as_bool(), settings["control_keys"].as_str());
+                session::rawkbm::set_host_control(m.host_control());
                 m
             },
             hotkey: crate::hotkey::spawn(self_tx.clone()),
@@ -202,7 +208,12 @@ impl Hub {
     /// Hand the close-the-games shortcut to the keyboard hotkey and the pad watcher.
     fn apply_shortcut(&self) {
         use crate::hotkey::Action;
-        for (action, keys) in [(Action::Stop, self.model.stop_keys()), (Action::Front, self.model.front_keys()), (Action::Hide, self.model.hide_keys())] {
+        for (action, keys) in [
+            (Action::Stop, self.model.stop_keys()),
+            (Action::Front, self.model.front_keys()),
+            (Action::Hide, self.model.hide_keys()),
+            (Action::Control, self.model.control_keys()),
+        ] {
             let combo = couchlink_core::shortcut::parse_keys(keys).ok().flatten();
             if let Err(e) = self.hotkey.set(action, combo) {
                 self.log(LogLevel::Warn, format!("The shortcut keys could not be set ({e}); another program may use them"));
@@ -321,6 +332,15 @@ impl Hub {
                         session::request_windows(front);
                     }
                 }
+                HubMsg::ControlShortcut => {
+                    if self.session_info.active() {
+                        match session::rawkbm::toggle_takeover() {
+                            Some(true) => self.log(LogLevel::Info, "Every keyboard and mouse now controls the game under the pointer; press the keys again to give them back"),
+                            Some(false) => self.log(LogLevel::Info, "Keyboards and mice are back with their players"),
+                            None => {}
+                        }
+                    }
+                }
                 HubMsg::UpdateChecked(result) => {
                     self.update_busy.0 = false;
                     let error = result.as_ref().err().cloned();
@@ -355,6 +375,13 @@ impl Hub {
                     Ok(()) => self.log(LogLevel::Info, format!("Player {}'s own Steam account was removed", seat + 1)),
                     Err(e) => self.log(LogLevel::Warn, format!("Player {}'s Steam account: {e}", seat + 1)),
                 },
+                HubMsg::VirtualScreensDone(result) => {
+                    match result {
+                        Ok(()) => self.log(LogLevel::Info, "Virtual screens are ready"),
+                        Err(e) => self.log(LogLevel::Warn, format!("Virtual screens: {e}")),
+                    }
+                    self.broadcast(&Event::GamesChanged);
+                }
             }
         }
         self.sdl
@@ -578,6 +605,16 @@ impl Hub {
                 }
                 Ok(none)
             }
+            Command::SetHostControl { on, keys } => {
+                if self.model.set_host_control(on, keys.as_deref())? {
+                    save_setting("host_control", json!(self.model.host_control()));
+                    save_setting("control_keys", json!(self.model.control_keys()));
+                    session::rawkbm::set_host_control(self.model.host_control());
+                    self.apply_shortcut();
+                    self.changed();
+                }
+                Ok(none)
+            }
             Command::SetStopShortcut { keys, pad } => {
                 if self.model.set_stop_shortcut(keys.as_deref(), pad.as_deref())? {
                     save_setting("stop_keys", json!(self.model.stop_keys()));
@@ -677,6 +714,15 @@ impl Hub {
             Command::StartSession { recipe, options } => self.start_session(&recipe, &options),
             Command::StopSession => self.stop_session(),
             Command::SteamAccounts => Ok(crate::accounts::list()),
+            Command::VirtualScreens => Ok(crate::vscreen_setup::status()),
+            Command::SetupVirtualScreens => {
+                // The Windows prompt waits for the person at the PC: off the hub task, reported with VirtualScreensDone.
+                let tx = self.self_tx.clone();
+                std::thread::spawn(move || {
+                    let _ = tx.send(HubMsg::VirtualScreensDone(crate::vscreen_setup::run()));
+                });
+                Ok(json!({ "started": true }))
+            }
             Command::OpenSteamAccount { seat } => crate::accounts::open(seat).map(|_| none),
             Command::SetupSteamAccount { seat } => self.steam_account_step("setup", seat),
             Command::RemoveSteamAccount { seat } => self.steam_account_step("remove", seat),

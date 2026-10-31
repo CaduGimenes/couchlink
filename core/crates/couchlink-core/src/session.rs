@@ -1,9 +1,9 @@
 //! Session types shared by the daemon and clients: the `session` event, `list_games` rows, and the
 //! maths from a screen arrangement to where each seat's window goes (docs/launch.md, docs/protocol.md).
 
+use crate::screens::Present;
 use crate::recipe::Recipe;
 use crate::recipe_parts::Choice;
-use crate::screens::Present;
 use crate::types::{Display, State};
 use serde::{Deserialize, Serialize};
 
@@ -159,6 +159,8 @@ pub struct SeatPlan {
     pub devices: Vec<String>,
     /// The seat each of `devices` belongs to: all `seat` for one copy per player, every player's for a native game.
     pub device_seats: Vec<usize>,
+    /// The screen is set to virtual screens: the copy plays on a virtual monitor of `rect`'s size, shown at `rect`.
+    pub virtual_screen: bool,
 }
 
 impl SeatPlan {
@@ -184,9 +186,6 @@ pub fn fallback_display(id: &str) -> Display {
 pub fn plan_seats(state: &State, recipe: &Recipe, allow_missing_display: bool) -> Result<Vec<SeatPlan>, String> {
     let mut plans: Vec<SeatPlan> = Vec::new();
     for screen in state.screens.iter().filter(|s| s.on && !s.seats.is_empty()) {
-        if screen.present == Present::Virtual {
-            return Err(format!("{} is set to a virtual display, which is not supported yet", screen.display));
-        }
         let display = match state.displays.iter().find(|d| d.id == screen.display) {
             Some(d) => d.clone(),
             None if allow_missing_display => fallback_display(&screen.display),
@@ -204,6 +203,7 @@ pub fn plan_seats(state: &State, recipe: &Recipe, allow_missing_display: bool) -
                 rect: region_rect(&display, *region),
                 devices: info.devices.clone(),
                 device_seats: vec![seat; info.devices.len()],
+                virtual_screen: screen.present == Present::Virtual,
             });
         }
     }
@@ -263,6 +263,8 @@ mod tests {
             stop_pad: String::new(),
             front_keys: String::new(),
             hide_keys: String::new(),
+            host_control: false,
+            control_keys: String::new(),
             dev: false,
         }
     }
@@ -310,6 +312,7 @@ mod tests {
             rect: Rect { x: 0, y: 0, w: 1, h: 1 },
             devices,
             device_seats: vec![0, 0, 0, 3, 3],
+            virtual_screen: false,
         };
         assert_eq!(plan.player_pads(), vec![("pad:1", 0), ("pad:7", 3)]);
     }
@@ -339,7 +342,7 @@ mod tests {
         assert_eq!(plan[0].rect, Rect { x: 0, y: 0, w: 1920, h: 1080 });
         let mut v = screen(&[0], &[[0.0, 0.0, 1.0, 1.0]]);
         v.present = Present::Virtual;
-        assert!(plan_seats(&state(vec![v]), &recipe([1, 4]), false).unwrap_err().contains("virtual"));
+        assert!(plan_seats(&state(vec![v]), &recipe([1, 4]), false).unwrap()[0].virtual_screen);
         let empty_seat = state(vec![screen(&[2], &[[0.0, 0.0, 1.0, 1.0]])]);
         assert!(plan_seats(&empty_seat, &recipe([1, 4]), false).unwrap_err().contains("no player"));
     }

@@ -190,6 +190,10 @@ mod win {
                 continue;
             }
             let device = from_wide(&mi.szDevice);
+            // A player's virtual screen is not a screen to put players on.
+            if crate::session::vscreens::is_ours(&device) {
+                continue;
+            }
             let r = mi.monitorInfo.rcMonitor;
 
             let (mut dx, mut dy) = (0u32, 0u32);

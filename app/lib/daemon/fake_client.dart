@@ -316,6 +316,18 @@ class FakeClient extends CouchClient {
         error: null,
       );
 
+  bool _virtualScreens = false;
+
+  @override
+  Future<bool?> virtualScreensReady() async => _virtualScreens;
+
+  @override
+  Future<String?> setupVirtualScreens() async {
+    _virtualScreens = true;
+    notifyListeners();
+    return null;
+  }
+
   @override
   Future<String?> setupSteamAccount(int seat) async {
     if (seat < 1 || seat >= kMaxSeats) return 'Seat ${seat + 1} cannot have its own Steam account';
@@ -478,7 +490,7 @@ class FakeClient extends CouchClient {
           sizes: s.sizes,
         ),
     ];
-    return DaemonState(devices: devices, seats: seats, displays: displays ?? _state.displays, screens: screens, layout: layout ?? _state.layout, fpsLimit: _state.fpsLimit, stopKeys: _state.stopKeys, stopPad: _state.stopPad, frontKeys: _state.frontKeys, hideKeys: _state.hideKeys, dev: _state.dev);
+    return DaemonState(devices: devices, seats: seats, displays: displays ?? _state.displays, screens: screens, layout: layout ?? _state.layout, fpsLimit: _state.fpsLimit, stopKeys: _state.stopKeys, stopPad: _state.stopPad, frontKeys: _state.frontKeys, hideKeys: _state.hideKeys, hostControl: _state.hostControl, controlKeys: _state.controlKeys, dev: _state.dev);
   }
 
   @override
@@ -494,7 +506,7 @@ class FakeClient extends CouchClient {
     }
     final used = {for (final s in screens) s.display: s.on};
     final displays = [for (final d in _state.displays) used.containsKey(d.id) ? d.copyWith(used: used[d.id]) : d];
-    _set(DaemonState(devices: _state.devices, seats: _state.seats, displays: displays, screens: screens, layout: _state.layout, fpsLimit: _state.fpsLimit, stopKeys: _state.stopKeys, stopPad: _state.stopPad, frontKeys: _state.frontKeys, hideKeys: _state.hideKeys, dev: _state.dev));
+    _set(DaemonState(devices: _state.devices, seats: _state.seats, displays: displays, screens: screens, layout: _state.layout, fpsLimit: _state.fpsLimit, stopKeys: _state.stopKeys, stopPad: _state.stopPad, frontKeys: _state.frontKeys, hideKeys: _state.hideKeys, hostControl: _state.hostControl, controlKeys: _state.controlKeys, dev: _state.dev));
     return null;
   }
 
@@ -544,7 +556,7 @@ class FakeClient extends CouchClient {
       stopKeys: _state.stopKeys,
       stopPad: _state.stopPad,
       frontKeys: _state.frontKeys,
-      hideKeys: _state.hideKeys,
+      hideKeys: _state.hideKeys, hostControl: _state.hostControl, controlKeys: _state.controlKeys,
       dev: _state.dev,
     );
     _set(_normalize(seats));
@@ -594,7 +606,7 @@ class FakeClient extends CouchClient {
   Future<String?> setFpsLimit(int fps) async {
     if (fps != 0 && (fps < 10 || fps > 360)) return '$fps fps is not a limit Couchlink takes (0 for none, or 10 to 360)';
     final s = _state;
-    _set(DaemonState(devices: s.devices, seats: s.seats, displays: s.displays, screens: s.screens, layout: s.layout, fpsLimit: fps, stopKeys: s.stopKeys, stopPad: s.stopPad, frontKeys: s.frontKeys, hideKeys: s.hideKeys, dev: s.dev));
+    _set(DaemonState(devices: s.devices, seats: s.seats, displays: s.displays, screens: s.screens, layout: s.layout, fpsLimit: fps, stopKeys: s.stopKeys, stopPad: s.stopPad, frontKeys: s.frontKeys, hideKeys: s.hideKeys, hostControl: s.hostControl, controlKeys: s.controlKeys, dev: s.dev));
     return null;
   }
 
@@ -635,7 +647,14 @@ class FakeClient extends CouchClient {
   @override
   Future<String?> setWindowKeys({String? front, String? hide}) async {
     final s = _state;
-    _set(DaemonState(devices: s.devices, seats: s.seats, displays: s.displays, screens: s.screens, layout: s.layout, fpsLimit: s.fpsLimit, stopKeys: s.stopKeys, stopPad: s.stopPad, frontKeys: front ?? s.frontKeys, hideKeys: hide ?? s.hideKeys, dev: s.dev));
+    _set(DaemonState(devices: s.devices, seats: s.seats, displays: s.displays, screens: s.screens, layout: s.layout, fpsLimit: s.fpsLimit, stopKeys: s.stopKeys, stopPad: s.stopPad, frontKeys: front ?? s.frontKeys, hideKeys: hide ?? s.hideKeys, hostControl: s.hostControl, controlKeys: s.controlKeys, dev: s.dev));
+    return null;
+  }
+
+  @override
+  Future<String?> setHostControl({bool? on, String? keys}) async {
+    final s = _state;
+    _set(DaemonState(devices: s.devices, seats: s.seats, displays: s.displays, screens: s.screens, layout: s.layout, fpsLimit: s.fpsLimit, stopKeys: s.stopKeys, stopPad: s.stopPad, frontKeys: s.frontKeys, hideKeys: s.hideKeys, hostControl: on ?? s.hostControl, controlKeys: keys ?? s.controlKeys, dev: s.dev));
     return null;
   }
 
@@ -646,7 +665,7 @@ class FakeClient extends CouchClient {
       return '$keys is not a key Couchlink can use for the shortcut';
     }
     if (pad != null && !const ['guide+back', 'guide+start', 'back+start', 'off'].contains(pad)) return '$pad is not a pad shortcut';
-    _set(DaemonState(devices: s.devices, seats: s.seats, displays: s.displays, screens: s.screens, layout: s.layout, fpsLimit: s.fpsLimit, stopKeys: keys ?? s.stopKeys, stopPad: pad ?? s.stopPad, frontKeys: s.frontKeys, hideKeys: s.hideKeys, dev: s.dev));
+    _set(DaemonState(devices: s.devices, seats: s.seats, displays: s.displays, screens: s.screens, layout: s.layout, fpsLimit: s.fpsLimit, stopKeys: keys ?? s.stopKeys, stopPad: pad ?? s.stopPad, frontKeys: s.frontKeys, hideKeys: s.hideKeys, hostControl: s.hostControl, controlKeys: s.controlKeys, dev: s.dev));
     return null;
   }
 

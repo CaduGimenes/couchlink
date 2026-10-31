@@ -51,6 +51,9 @@ abstract class CouchClient extends ChangeNotifier {
   /// The keys that bring the game windows to the front and hide them (`set_window_keys`); null parts stay.
   Future<String?> setWindowKeys({String? front, String? hide});
 
+  /// Host control on or off, and the keys that hand every keyboard and mouse over (`set_host_control`); null parts stay.
+  Future<String?> setHostControl({bool? on, String? keys});
+
   /// True while couchlinkd is downloading a fresh catalog.
   bool get catalogRefreshing => false;
 
@@ -157,6 +160,13 @@ abstract class CouchClient extends ChangeNotifier {
 
   /// `steam_accounts`: which seats play on their own Steam account, and the setup plan.
   Future<({SteamAccounts? value, String? error})> steamAccounts();
+
+  /// `virtual_screens`: true when the display driver for virtual screens is installed and ready (null on error).
+  Future<bool?> virtualScreensReady();
+
+  /// `setup_virtual_screens`: installs the display driver (one Windows prompt). Replies at once; a log line says
+  /// when it is done.
+  Future<String?> setupVirtualScreens();
 
   /// `setup_steam_account`: one Windows prompt, then that seat's Steam opens for sign-in. Replies at once.
   Future<String?> setupSteamAccount(int seat);

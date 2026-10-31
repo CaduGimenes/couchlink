@@ -10,7 +10,7 @@ import '../l10n/l10n.dart';
 import 'catalog_logic.dart';
 import 'profile_files.dart';
 
-enum AppView { library, players, screens, discover, dev }
+enum AppView { library, players, screens, discover, recipe, dev }
 
 /// UI-only state: where you are, local settings, the picked game.
 class UiState extends ChangeNotifier {

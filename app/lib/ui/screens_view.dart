@@ -969,16 +969,74 @@ class _ShapeRow extends StatelessWidget {
   }
 }
 
-/// Windows (fastest) or virtual screens (most compatible) for the game copies on this screen.
-class _PresentRow extends StatelessWidget {
+/// Windows (fastest) or virtual screens (most compatible) for the game copies on this screen. Virtual screens need
+/// a display driver once; while it is missing the row offers to install it.
+class _PresentRow extends StatefulWidget {
   const _PresentRow({required this.ctl, required this.edit});
   final ScreensController ctl;
   final ScreenEdit edit;
 
   @override
+  State<_PresentRow> createState() => _PresentRowState();
+}
+
+class _PresentRowState extends State<_PresentRow> {
+  /// Null until asked (or when the service could not say).
+  bool? _ready;
+  bool _installing = false;
+  Timer? _poll;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _ask();
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _ask() async {
+    final ready = await Scope.of(context).client.virtualScreensReady();
+    if (!mounted) return;
+    setState(() => _ready = ready);
+    if (ready == true) {
+      _poll?.cancel();
+      _installing = false;
+    }
+  }
+
+  Future<void> _install() async {
+    final scope = Scope.of(context);
+    setState(() => _installing = true);
+    final err = await scope.client.setupVirtualScreens();
+    if (!mounted) return;
+    if (err != null) {
+      scope.toaster.show(err, long: true);
+      setState(() => _installing = false);
+      return;
+    }
+    // The setup waits for the Windows prompt and the install; check until it is done (a log line also says so).
+    _poll?.cancel();
+    var tries = 0;
+    _poll = Timer.periodic(const Duration(seconds: 2), (t) {
+      tries++;
+      if (tries > 90) {
+        t.cancel();
+        if (mounted) setState(() => _installing = false);
+      }
+      _ask();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final edit = widget.edit;
     final virtual = edit.present == 'virtual';
+    final missing = virtual && _ready == false;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Wrap(spacing: 10, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
         Text('Show games as', style: txt(context, size: 12, color: c.ink3)),
@@ -986,7 +1044,7 @@ class _PresentRow extends StatelessWidget {
           keyPrefix: 'present',
           value: edit.present,
           options: const [('window', 'Windows (fastest)'), ('virtual', 'Virtual screens (most compatible)')],
-          onChanged: (v) => ctl.setPresent(edit.display.id, v),
+          onChanged: (v) => widget.ctl.setPresent(edit.display.id, v),
         ),
       ]),
       const SizedBox(height: 6),
@@ -996,6 +1054,25 @@ class _PresentRow extends StatelessWidget {
             : t('Each game runs in a borderless window placed on its part of this screen. Fastest, no extra drivers. Some games only work full screen; switch to virtual screens for those.'),
         style: txt(context, size: 12, color: c.ink2, height: 1.4),
       ),
+      if (missing) ...[
+        const SizedBox(height: 8),
+        Row(children: [
+          CButton(
+            key: const ValueKey('install-virtual-screens'),
+            label: _installing ? t('Installing...') : t('Install the display driver'),
+            small: true,
+            primary: true,
+            onTap: _installing ? null : _install,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              t('Once, with one Windows prompt: the free Virtual Display Driver (MIT).'),
+              style: txt(context, size: 11.5, color: c.ink3, height: 1.35),
+            ),
+          ),
+        ]),
+      ],
     ]);
   }
 }

@@ -195,6 +195,8 @@ class DaemonState {
     this.stopPad = 'guide+back',
     this.frontKeys = 'Ctrl+Shift+F',
     this.hideKeys = 'Ctrl+Shift+H',
+    this.hostControl = true,
+    this.controlKeys = 'Ctrl+Shift+K',
     this.dev = false,
   });
 
@@ -219,6 +221,11 @@ class DaemonState {
   /// The keys that bring the game windows to the front, and hide them; `off` when off.
   final String frontKeys;
   final String hideKeys;
+
+  /// Keyboards and mice no player has control the game under the desktop pointer; [controlKeys] hand every keyboard
+  /// and mouse over to it and back (`off` when off).
+  final bool hostControl;
+  final String controlKeys;
   final bool dev;
 
   Device? device(String id) {
@@ -270,6 +277,8 @@ class DaemonState {
       stopPad: _str(j['stop_pad'], 'guide+back'),
       frontKeys: _str(j['front_keys'], 'Ctrl+Shift+F'),
       hideKeys: _str(j['hide_keys'], 'Ctrl+Shift+H'),
+      hostControl: j['host_control'] != false,
+      controlKeys: _str(j['control_keys'], 'Ctrl+Shift+K'),
       dev: j['dev'] == true,
     );
   }

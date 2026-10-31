@@ -35,8 +35,21 @@ void main() {
     await tester.tap(byKey('stop-pad-back+start'));
     await tester.pump(const Duration(milliseconds: 100));
     expect((fake.state as DaemonState).stopPad, 'back+start');
+    await tester.ensureVisible(byKey('stop-keys-off'));
     await tester.tap(byKey('stop-keys-off'));
     await tester.pump(const Duration(milliseconds: 100));
     expect((fake.state as DaemonState).stopKeys, 'off');
+
+    // Host control: the switch and the takeover keys.
+    expect((fake.state as DaemonState).hostControl, isTrue);
+    await tester.ensureVisible(byKey('host-control'));
+    await tester.tap(byKey('host-control'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect((fake.state as DaemonState).hostControl, isFalse);
+    expect((fake.state as DaemonState).controlKeys, 'Ctrl+Shift+K');
+    await tester.ensureVisible(byKey('control-keys-off'));
+    await tester.tap(byKey('control-keys-off'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect((fake.state as DaemonState).controlKeys, 'off');
   });
 }

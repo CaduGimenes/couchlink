@@ -9,7 +9,7 @@ import 'locate.dart';
 import 'models.dart';
 import 'profile.dart';
 
-const String appVersion = '0.1.9';
+const String appVersion = '0.1.10';
 
 /// Start of the `log` warning couchlinkd sends when a catalog download fails.
 const String catalogFailurePrefix = 'Game catalog could not be refreshed';
@@ -88,6 +88,9 @@ class DaemonClient extends CouchClient {
   Future<String?> setUpdateCheck(bool on) => _cmd('set_update_check', {'on': on});
   @override
   Future<String?> setWindowKeys({String? front, String? hide}) => _cmd('set_window_keys', {'front': ?front, 'hide': ?hide});
+
+  @override
+  Future<String?> setHostControl({bool? on, String? keys}) => _cmd('set_host_control', {'on': ?on, 'keys': ?keys});
   @override
   bool get catalogRefreshing => _refreshing;
   @override
@@ -467,6 +470,15 @@ class DaemonClient extends CouchClient {
 
   @override
   Future<String?> setupSteamAccount(int seat) => _cmd('setup_steam_account', {'seat': seat});
+
+  @override
+  Future<bool?> virtualScreensReady() async {
+    final r = await _request('virtual_screens', const {});
+    return r['ok'] == true ? r['ready'] == true : null;
+  }
+
+  @override
+  Future<String?> setupVirtualScreens() => _cmd('setup_virtual_screens');
 
   @override
   Future<String?> openSteamAccount(int seat) => _cmd('open_steam_account', {'seat': seat});

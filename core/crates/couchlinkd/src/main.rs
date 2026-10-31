@@ -11,6 +11,7 @@ mod logfile;
 mod profiles;
 mod sdl;
 mod session;
+mod vscreen_setup;
 mod ws;
 
 use couchlink_core::paths::{self, DaemonInfo};
@@ -160,6 +161,10 @@ fn main() {
     }
     // The elevated half of setting up or removing a seat's own Steam account (see accounts.rs).
     if let Some(code) = accounts::cli(&std::env::args().collect::<Vec<_>>()) {
+        std::process::exit(code);
+    }
+    // The elevated half of the display driver setup for virtual screens (see vscreen_setup.rs).
+    if let Some(code) = vscreen_setup::cli(&all) {
         std::process::exit(code);
     }
     let args = match parse_args() {

@@ -90,6 +90,8 @@ struct Run {
     /// Shared and per-seat helper programs, ended with the session.
     helpers: Vec<Box<dyn super::Child>>,
     placer: Placer,
+    /// Virtual screens: one window per player showing their virtual monitor (closed before the journal is undone).
+    presenters: Vec<super::present::Presenter>,
     last_maintain: Instant,
     /// When each copy's input diagnostics were last written for the player's report.
     last_diagnostics: Instant,
@@ -149,6 +151,7 @@ pub fn run(plan: Plan, deps: Deps, stop: Arc<AtomicBool>, report: Report) {
         seats,
         helpers: Vec::new(),
         placer: Placer::new(),
+        presenters: Vec::new(),
         last_maintain: Instant::now(),
         last_diagnostics: Instant::now(),
         hidden: false,
@@ -201,6 +204,7 @@ impl Run {
             }
         }
         self.registry(&recipe, None)?;
+        self.virtual_screens()?;
         // Game Mode shows one window: the copies' windows go into one nested KWin, started before the seats'
         // sandboxes so they see its X socket too.
         #[cfg(target_os = "linux")]
@@ -249,6 +253,26 @@ impl Run {
             self.info.state = SessionState::Running;
             self.publish();
         }
+        Ok(())
+    }
+
+    /// Seats on a screen set to virtual screens get a virtual monitor of their part's size: the copy plays there (its
+    /// rect becomes the monitor's) and a window in the part shows it.
+    fn virtual_screens(&mut self) -> Result<(), String> {
+        let idxs: Vec<usize> = (0..self.seats.len()).filter(|&i| self.seats[i].plan.virtual_screen).collect();
+        if idxs.is_empty() {
+            return Ok(());
+        }
+        let parts: Vec<couchlink_core::session::Rect> = idxs.iter().map(|&i| self.seats[i].plan.rect).collect();
+        let sizes: Vec<(i32, i32)> = parts.iter().map(|&r| super::vscreens::monitor_size(r)).collect();
+        let made = super::vscreens::Session::begin(&sizes, &mut self.journal)?;
+        let mut redirects = Vec::new();
+        for ((&i, part), vd) in idxs.iter().zip(parts).zip(made.displays) {
+            self.seats[i].plan.rect = vd.rect;
+            redirects.push((part, vd.rect));
+            self.presenters.push(super::present::Presenter::start(vd.device, part));
+        }
+        super::rawkbm::set_redirects(redirects);
         Ok(())
     }
 
@@ -504,7 +528,8 @@ impl Run {
             log: seat.map(|i| crate::logfile::copy_log(&recipe.id, self.seats[i].plan.seat)),
             block_desktop_kbm: seat.is_some_and(|i| {
                 let has_kbm = |devs: &[String]| devs.iter().any(|d| d == "kbm:system" || super::rawkbm::is_kbm_id(d));
-                !has_kbm(&self.seats[i].plan.devices) && self.seats.iter().any(|s| has_kbm(&s.plan.devices))
+                // With host control on every copy gets a feed, so the desktop's keys reach only the copy under the pointer.
+                !has_kbm(&self.seats[i].plan.devices) && (super::rawkbm::host_control() || self.seats.iter().any(|s| has_kbm(&s.plan.devices)))
             }),
         })
     }
@@ -798,11 +823,13 @@ impl Run {
                 self.on_top = self.hidden || !self.on_top;
                 self.hidden = false;
                 self.placer.show_all(true, self.on_top);
+                self.presenters.iter().for_each(|p| p.set_shown(true, self.on_top));
                 self.even_out_copies();
             }
             2 => {
                 self.hidden = true;
                 self.placer.show_all(false, false);
+                self.presenters.iter().for_each(|p| p.set_shown(false, false));
             }
             _ => {}
         }
@@ -850,6 +877,8 @@ impl Run {
 
     /// Windows back to normal, copies closed (killed after a grace period), the helpers stopped.
     fn close_everything(&mut self) {
+        self.presenters.clear();
+        super::rawkbm::set_redirects(Vec::new());
         self.placer.restore_all();
         for s in self.seats.iter().filter(|s| !s.exited) {
             if let Some(c) = &s.child {

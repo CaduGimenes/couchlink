@@ -21,6 +21,11 @@
 //!
 //! Depends only on `couchlink_hook` (and std, plus windows-sys on Windows), so it is testable without SDL.
 //!
+//! Host control: keyboards and mice no seat owns (all of them while the control keys hold a takeover) control the
+//! game copy under the desktop pointer, so whoever sits at the PC can change a copy's settings. The target is picked
+//! from the window under the real pointer (its process) and kept while a key or button is down; mouse movement is
+//! sent so the copy's own cursor lands where the real pointer is.
+//!
 //! Limits: devices that Windows merges (for example a laptop's touchpad and keyboard) are as many raw devices as the
 //! driver reports; a gaming mouse often shows up as a keyboard as well, which is harmless. Absolute pointing
 //! devices (remote desktop, tablets) are turned into relative movement. Raw Input does not stop the real keyboard
@@ -31,6 +36,7 @@
 use couchlink_hook::kbmfeed::{key_flags, mouse_flags, KbmFeed, KBM_MAX_DEVICES};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
+use couchlink_core::session::Rect;
 use std::sync::{Arc, LazyLock, Mutex};
 
 /// Prefix of keyboard device ids.
@@ -222,7 +228,41 @@ struct Seat {
     feed: KbmFeed,
     /// Device ids; the index is the device index in the feed.
     devices: Vec<String>,
+    /// Processes of the copy this feed belongs to (host control finds the copy under the pointer by them).
+    pids: Vec<u32>,
 }
+
+impl Seat {
+    fn runs(&self, pid: u32) -> bool {
+        pid != 0 && (self.pids.contains(&pid) || self.feed.hook_pid() == pid)
+    }
+}
+
+/// The window under the desktop pointer: its process, and the pointer in its client area (of that size).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Pointer {
+    pub pid: u32,
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+}
+
+/// Where host control sends input right now.
+#[derive(Default)]
+struct HostRoute {
+    /// Seat feed (by `Seat::id`), kept while anything is held down through it.
+    target: Option<u64>,
+    /// Keys (virtual key) and mouse buttons (`HOST_BUTTON | down flag`) held down through host control, per device.
+    down: HashSet<(String, u16)>,
+    /// The target's cursor in its client area, as last sent.
+    sent: (i32, i32),
+}
+
+/// Marks a mouse button in `HostRoute::down` (key codes stay below 0x100).
+const HOST_BUTTON: u16 = 0x8000;
+/// RI_MOUSE_*_DOWN flags; each button's UP flag is its DOWN flag shifted left once.
+const BUTTON_DOWNS: [u16; 5] = [0x1, 0x4, 0x10, 0x40, 0x100];
 
 #[derive(Default)]
 struct Registry {
@@ -235,6 +275,13 @@ struct Registry {
     /// Last absolute position per device handle.
     absolute: HashMap<u64, (i32, i32)>,
     started: bool,
+    /// Host control (Settings): keyboards and mice without a seat control the copy under the pointer.
+    host_spare: bool,
+    /// The control keys handed every keyboard and mouse to the copy under the pointer.
+    host_takeover: bool,
+    host: HostRoute,
+    /// Finds the window under the pointer (the platform's when None; tests put their own).
+    pointer: Option<fn() -> Option<Pointer>>,
 }
 
 static REGISTRY: LazyLock<Mutex<Registry>> = LazyLock::new(|| Mutex::new(Registry::default()));
@@ -257,6 +304,9 @@ impl Registry {
 
     /// Writes the input to the seat feed that owns the device, or reports press to join.
     fn route(&mut self, device: &str, input: Input) -> Option<RawKbmEvent> {
+        if self.route_host(device, input) {
+            return None;
+        }
         for seat in self.seats.iter_mut() {
             if let Some(idx) = seat.devices.iter().position(|d| d == device) {
                 match input {
@@ -284,6 +334,107 @@ impl Registry {
                 }
             }
             Input::Mouse { .. } => None,
+        }
+    }
+
+    /// Host control: sends the input to the copy under the pointer when it applies. True when it did.
+    fn route_host(&mut self, device: &str, input: Input) -> bool {
+        let owned = self.seats.iter().any(|s| s.devices.iter().any(|d| d == device));
+        if !(self.host_takeover || (self.host_spare && !owned)) {
+            self.release_host(device, input);
+            return false;
+        }
+        // A key that went down before host control took it is let go where it went down.
+        if let Input::Key { vk, flags, .. } = input {
+            if flags & key_flags::BREAK != 0 && !self.host.down.contains(&(device.to_string(), vk)) {
+                return false;
+            }
+        }
+        let pointer = self.pointer.unwrap_or(platform_pointer)();
+        let held = self.host.target.filter(|t| !self.host.down.is_empty() && self.seats.iter().any(|s| s.id == *t));
+        let target = match held {
+            Some(t) => t,
+            None => {
+                let Some(seat) = pointer.and_then(|p| self.seats.iter().find(|s| s.runs(p.pid))) else {
+                    self.host.target = None;
+                    return false;
+                };
+                if self.host.target != Some(seat.id) {
+                    // The copy's cursor starts where its hook last put it, or in the middle of the window.
+                    let (x, y, _) = seat.feed.cursor();
+                    let p = pointer.expect("found by the pointer");
+                    self.host.sent = if seat.feed.hook_pid() != 0 { (x, y) } else { (p.w / 2, p.h / 2) };
+                    self.host.target = Some(seat.id);
+                }
+                seat.id
+            }
+        };
+        let on_target = pointer.filter(|p| self.seats.iter().any(|s| s.id == target && s.runs(p.pid)));
+        match input {
+            Input::Key { vk, flags, .. } => {
+                let k = (device.to_string(), vk);
+                if flags & key_flags::BREAK != 0 {
+                    self.host.down.remove(&k);
+                } else {
+                    self.host.down.insert(k);
+                }
+            }
+            Input::Mouse { flags, .. } => {
+                for d in BUTTON_DOWNS {
+                    if flags & d != 0 {
+                        self.host.down.insert((device.to_string(), HOST_BUTTON | d));
+                    }
+                    if flags & (d << 1) != 0 {
+                        self.host.down.remove(&(device.to_string(), HOST_BUTTON | d));
+                    }
+                }
+            }
+        }
+        let input = match (input, on_target) {
+            // The copy's cursor follows the real pointer, so it points where the player sees the pointer.
+            (Input::Mouse { flags, wheel, .. }, Some(p)) => {
+                let (dx, dy) = (p.x - self.host.sent.0, p.y - self.host.sent.1);
+                self.host.sent = (p.x, p.y);
+                Input::Mouse { dx, dy, flags, wheel }
+            }
+            (i, _) => i,
+        };
+        let seat = self.seats.iter_mut().find(|s| s.id == target).expect("target seat checked above");
+        let idx = seat.devices.iter().position(|d| d == device).unwrap_or(0) as u8;
+        match input {
+            Input::Key { vk, scan, flags } => seat.feed.push_key(idx, vk, scan, flags),
+            Input::Mouse { dx, dy, flags, wheel } => {
+                if dx != 0 || dy != 0 || flags != 0 {
+                    seat.feed.push_mouse(idx, dx, dy, flags, wheel)
+                }
+            }
+        }
+        true
+    }
+
+    /// With host control off for `device`: keys and buttons it still holds down in a copy are let go there.
+    fn release_host(&mut self, device: &str, input: Input) {
+        let Some(target) = self.host.target else { return };
+        let (key, buttons) = match input {
+            Input::Key { vk, flags, .. } if flags & key_flags::BREAK != 0 => (self.host.down.remove(&(device.to_string(), vk)).then_some(input), 0),
+            Input::Mouse { flags, .. } => {
+                let mut up = 0u16;
+                for d in BUTTON_DOWNS {
+                    if flags & (d << 1) != 0 && self.host.down.remove(&(device.to_string(), HOST_BUTTON | d)) {
+                        up |= d << 1;
+                    }
+                }
+                (None, up)
+            }
+            _ => (None, 0),
+        };
+        let Some(seat) = self.seats.iter_mut().find(|s| s.id == target) else { return };
+        let idx = seat.devices.iter().position(|d| d == device).unwrap_or(0) as u8;
+        if let Some(Input::Key { vk, scan, flags }) = key {
+            seat.feed.push_key(idx, vk, scan, flags);
+        }
+        if buttons != 0 {
+            seat.feed.push_mouse(idx, 0, 0, buttons, 0);
         }
     }
 
@@ -413,7 +564,78 @@ impl KbmGuard {
 
 impl Drop for KbmGuard {
     fn drop(&mut self) {
-        registry().seats.retain(|s| s.id != self.id);
+        let mut reg = registry();
+        reg.seats.retain(|s| s.id != self.id);
+        if reg.seats.is_empty() {
+            reg.host_takeover = false;
+            reg.host = HostRoute::default();
+        }
+    }
+}
+
+/// Host control on or off (Settings): keyboards and mice no seat owns control the copy under the pointer.
+pub fn set_host_control(on: bool) {
+    registry().host_spare = on;
+}
+
+/// Whether host control is on.
+pub fn host_control() -> bool {
+    registry().host_spare
+}
+
+/// The control keys: every keyboard and mouse controls the copy under the pointer, or goes back to its player.
+/// The new state, or None when no copy has a feed (nothing to control).
+pub fn toggle_takeover() -> Option<bool> {
+    let on = {
+        let mut reg = registry();
+        if reg.seats.is_empty() {
+            return None;
+        }
+        reg.host_takeover = !reg.host_takeover;
+        reg.host_takeover
+    };
+    if on {
+        let _ = start();
+    }
+    Some(on)
+}
+
+/// The copy fed by `name` runs in process `pid` (host control finds it by the window under the pointer).
+pub fn add_pid(name: &str, pid: u32) {
+    if let Some(seat) = registry().seats.iter_mut().find(|s| s.name == name) {
+        if !seat.pids.contains(&pid) {
+            seat.pids.push(pid);
+        }
+    }
+}
+
+/// Parts of the desktop that show another part (virtual screens: the player's part shows their virtual monitor).
+/// The pointer over `from` counts as over the same spot of `to`.
+static REDIRECTS: Mutex<Vec<(Rect, Rect)>> = Mutex::new(Vec::new());
+
+/// Sets the parts that show another part (empty: none).
+pub fn set_redirects(r: Vec<(Rect, Rect)>) {
+    *REDIRECTS.lock().unwrap_or_else(|e| e.into_inner()) = r;
+}
+
+/// Where a desktop point really points, after the redirects.
+pub fn redirect(x: i32, y: i32) -> (i32, i32) {
+    for (from, to) in REDIRECTS.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+        if x >= from.x && y >= from.y && x < from.x + from.w && y < from.y + from.h {
+            return (to.x + (x - from.x) * to.w / from.w.max(1), to.y + (y - from.y) * to.h / from.h.max(1));
+        }
+    }
+    (x, y)
+}
+
+fn platform_pointer() -> Option<Pointer> {
+    #[cfg(windows)]
+    {
+        win::pointer()
+    }
+    #[cfg(not(windows))]
+    {
+        None
     }
 }
 
@@ -445,7 +667,7 @@ pub fn attach_shared(name: &str, devices: &[String], share_with: Option<&str>) -
     let mut reg = registry();
     reg.next_seat_id += 1;
     let id = reg.next_seat_id;
-    reg.seats.push(Seat { id, name: name.to_string(), feed, devices: ids });
+    reg.seats.push(Seat { id, name: name.to_string(), feed, devices: ids, pids: Vec::new() });
     reg.update_handles();
     Ok(KbmGuard { id, name: name.to_string() })
 }
@@ -456,11 +678,15 @@ pub const PAD_KBM_DEVICE: &str = "pad-kbm";
 /// A feed for a seat whose pad sends keys or mouse input through its profile (a seat without a keyboard or mouse of
 /// its own). `push_pad` writes into it.
 pub fn attach_pad(name: &str, share_with: Option<&str>) -> Result<KbmGuard, String> {
+    if host_control() {
+        // Host control reads the desktop's keyboards and mice even when no seat has one.
+        let _ = start();
+    }
     let feed = KbmFeed::create_shared(name, share_with).map_err(|e| format!("cannot create the keyboard and mouse feed: {e}"))?;
     let mut reg = registry();
     reg.next_seat_id += 1;
     let id = reg.next_seat_id;
-    reg.seats.push(Seat { id, name: name.to_string(), feed, devices: vec![PAD_KBM_DEVICE.to_string()] });
+    reg.seats.push(Seat { id, name: name.to_string(), feed, devices: vec![PAD_KBM_DEVICE.to_string()], pids: Vec::new() });
     reg.update_handles();
     Ok(KbmGuard { id, name: name.to_string() })
 }
@@ -540,6 +766,34 @@ mod win {
 
     fn wide(s: &str) -> Vec<u16> {
         OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+    }
+
+    /// The top-level window under the real pointer: its process and the pointer in its client area.
+    pub fn pointer() -> Option<Pointer> {
+        use windows_sys::Win32::Foundation::{POINT, RECT};
+        use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GetClientRect, GetCursorPos, GetWindowThreadProcessId, WindowFromPoint, GA_ROOT};
+        // SAFETY: plain queries on a window handle the system just returned; a stale handle only makes them fail.
+        unsafe {
+            let mut pt = POINT { x: 0, y: 0 };
+            if GetCursorPos(&mut pt) == 0 {
+                return None;
+            }
+            (pt.x, pt.y) = redirect(pt.x, pt.y);
+            let under = WindowFromPoint(pt);
+            if under.is_null() {
+                return None;
+            }
+            let root = GetAncestor(under, GA_ROOT);
+            let root = if root.is_null() { under } else { root };
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(root, &mut pid);
+            let mut client = pt;
+            ScreenToClient(root, &mut client);
+            let mut r: RECT = std::mem::zeroed();
+            GetClientRect(root, &mut r);
+            Some(Pointer { pid, x: client.x, y: client.y, w: r.right - r.left, h: r.bottom - r.top })
+        }
     }
 
     pub fn start() -> Result<(), String> {
@@ -876,6 +1130,19 @@ pub fn test_reset() {
     reg.devices.clear();
     reg.seats.clear();
     reg.held.clear();
+    reg.host_spare = false;
+    reg.host_takeover = false;
+    reg.host = HostRoute::default();
+    reg.pointer = None;
+}
+
+/// Host control in tests: whether it is on, a takeover, and the window under the pointer.
+#[cfg(test)]
+pub fn test_host(spare: bool, takeover: bool, pointer: fn() -> Option<Pointer>) {
+    let mut reg = registry();
+    reg.host_spare = spare;
+    reg.host_takeover = takeover;
+    reg.pointer = Some(pointer);
 }
 
 /// Attaches a seat feed without starting the Raw Input listener.
@@ -889,7 +1156,7 @@ pub fn test_attach(name: &str, devices: &[String]) -> Result<KbmGuard, String> {
     let mut reg = registry();
     reg.next_seat_id += 1;
     let id = reg.next_seat_id;
-    reg.seats.push(Seat { id, name: name.to_string(), feed, devices: ids });
+    reg.seats.push(Seat { id, name: name.to_string(), feed, devices: ids, pids: Vec::new() });
     reg.update_handles();
     Ok(KbmGuard { id, name: name.to_string() })
 }
@@ -976,6 +1243,7 @@ mod tests {
 
     const KBD1: &str = r"\\?\HID#VID_046D&PID_C31C#7&2f1c3b9a&0&0000#{884b96c3-56ef-11d1-bc8c-00a0c91405dd}";
     const KBD2: &str = r"\\?\HID#VID_046D&PID_C31C#7&1a2b3c4d&0&0000#{884b96c3-56ef-11d1-bc8c-00a0c91405dd}";
+    const KBD3: &str = r"\\?\HID#VID_046D&PID_C31C#7&5e6f7a8b&0&0000#{884b96c3-56ef-11d1-bc8c-00a0c91405dd}";
     const MOUSE1: &str = r"\\?\HID#VID_1532&PID_0043#7&aa11bb22&0&0000#{378de44c-56ef-11d1-bc8c-00a0c91405dd}";
 
     #[test]
@@ -1070,6 +1338,64 @@ mod tests {
         assert!(attach("Local\\couchlink-kbm-unit-none", &["pad:1".to_string()]).is_err());
         drop(guard);
         assert!(!active());
+        test_reset();
+    }
+
+    static POINTER_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+    fn test_pointer() -> Option<Pointer> {
+        Some(Pointer { pid: POINTER_PID.load(std::sync::atomic::Ordering::Relaxed), x: 100, y: 50, w: 800, h: 600 })
+    }
+
+    #[test]
+    fn host_control_sends_spare_and_taken_input_to_the_copy_under_the_pointer() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let _l = test_lock();
+        test_reset();
+        let k1 = test_add_device(Kind::Keyboard, KBD1, 31);
+        let k2 = test_add_device(Kind::Keyboard, KBD2, 32);
+        let spare = test_add_device(Kind::Mouse, MOUSE1, 33);
+        let a = test_attach("Local\\couchlink-kbm-unit-host-a", &[k1.id.clone()]).expect("attach a");
+        let b = test_attach("Local\\couchlink-kbm-unit-host-b", &[k2.id.clone()]).expect("attach b");
+        add_pid(a.name(), 100);
+        add_pid(b.name(), 200);
+        let head = |name: &str| registry().seats.iter().find(|s| s.name == name).unwrap().feed.head();
+        test_host(true, false, test_pointer);
+
+        // The spare mouse over copy B: its button and movement go there.
+        POINTER_PID.store(200, Relaxed);
+        test_input(&spare.id, Input::Mouse { dx: 5, dy: 5, flags: mouse_flags::LEFT_DOWN, wheel: 0 });
+        assert_eq!((head(a.name()), head(b.name())), (0, 1));
+        // Held down, the target stays B even with the pointer over A.
+        POINTER_PID.store(100, Relaxed);
+        test_input(&spare.id, Input::Mouse { dx: 0, dy: 0, flags: mouse_flags::LEFT_UP, wheel: 0 });
+        assert_eq!((head(a.name()), head(b.name())), (0, 2));
+        // Released, it follows the pointer to A.
+        test_input(&spare.id, Input::Mouse { dx: 1, dy: 0, flags: 0, wheel: 0 });
+        assert_eq!(head(a.name()), 1);
+        // A seated keyboard still plays its own copy.
+        test_input(&k2.id, Input::Key { vk: 0x41, scan: 0x1E, flags: 0 });
+        assert_eq!(head(b.name()), 3);
+
+        // Pointer over no copy: a spare keyboard's Enter joins as before.
+        POINTER_PID.store(999, Relaxed);
+        let k3 = test_add_device(Kind::Keyboard, KBD3, 34);
+        assert_eq!(test_input(&k3.id, Input::Key { vk: 0x0D, scan: 0x1C, flags: 0 }), Some(RawKbmEvent::Press(k3.id.clone())));
+
+        // Takeover: player B's keyboard controls copy A under the pointer; its key up after the takeover ends goes there too.
+        POINTER_PID.store(100, Relaxed);
+        test_host(true, true, test_pointer);
+        test_input(&k2.id, Input::Key { vk: 0x42, scan: 0x30, flags: 0 });
+        assert_eq!((head(a.name()), head(b.name())), (2, 3));
+        test_host(true, false, test_pointer);
+        test_input(&k2.id, Input::Key { vk: 0x42, scan: 0x30, flags: key_flags::BREAK });
+        assert_eq!((head(a.name()), head(b.name())), (3, 4), "the break reaches A (held there) and B (its owner)");
+
+        // Host control off: the spare mouse reaches no copy.
+        test_host(false, false, test_pointer);
+        test_input(&spare.id, Input::Mouse { dx: 1, dy: 0, flags: 0, wheel: 0 });
+        assert_eq!(head(a.name()), 3);
+        drop((a, b));
         test_reset();
     }
 }

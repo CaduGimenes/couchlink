@@ -54,3 +54,18 @@ https://github.com/TsudaKageyu/minhook, commit 8af6b4acae5a9388fd742b56fa79ece89
 `third_party/minhook/` (`src/`, `include/`, and its `LICENSE.txt`, which also covers the bundled Hacker Disassembler
 Engine by Vyacheslav Patkov). Copyright (C) 2009-2017 Tsuda Kageyu, all rights reserved; the full license text is in
 `third_party/minhook/LICENSE.txt` and must stay with any binary or source distribution.
+
+## Virtual Display Driver (MIT)
+
+https://github.com/VirtualDrivers/Virtual-Display-Driver, release 25.7.23 (`VirtualDisplayDriver-x86.Driver.Only.zip`).
+Virtual screens (`core/crates/couchlinkd/src/session/vscreens.rs`) use this driver for one virtual monitor per player.
+Couchlink does not ship it: the one-time setup (`core/crates/couchlinkd/src/vscreen_setup.rs`) downloads that release
+on the player's PC, checks its SHA-256 and installs it the way the project's own silent install does. Couchlink talks to
+it through its settings file and its named pipe, and the settings layout it writes follows the driver's default
+`vdd_settings.xml`. Copyright (c) 2024 Virtual Display, MIT License.
+
+## nefcon (MIT)
+
+https://github.com/nefarius/nefcon, release v1.14.0 (`nefcon_v1.14.0.zip`). The virtual screens setup downloads it
+(SHA-256 checked) and runs `nefconw` once to create the display driver's device, then deletes it. Couchlink does not
+ship it. Copyright (c) 2022-2026 Nefarius Software Solutions e.U., MIT License.

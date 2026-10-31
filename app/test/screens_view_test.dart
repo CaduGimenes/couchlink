@@ -158,6 +158,12 @@ void main() {
     await tester.pump();
     expect(screenOf(fake, 'disp:1')!.present, 'virtual');
     expect(find.textContaining('virtual screen sized exactly to their part'), findsOneWidget);
+    // No driver yet: the row offers it, and after the install the offer goes away.
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(byKey('install-virtual-screens'), findsOneWidget);
+    await tester.tap(byKey('install-virtual-screens'));
+    await tester.pump(const Duration(seconds: 3));
+    expect(byKey('install-virtual-screens'), findsNothing);
 
     await tester.tap(byKey('editor-done'));
     await tester.pumpAndSettle();

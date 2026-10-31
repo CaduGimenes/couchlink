@@ -104,7 +104,7 @@ pub fn cli(args: &[String]) -> Option<i32> {
 
 /// Runs this exe again with `args`, elevated (Windows asks the user), and waits for it.
 #[cfg(windows)]
-fn elevate(args: &[String]) -> Result<i32, String> {
+pub fn elevate(args: &[String]) -> Result<i32, String> {
     use std::ptr::{null, null_mut};
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject, INFINITE};
@@ -142,7 +142,7 @@ fn elevate(args: &[String]) -> Result<i32, String> {
 
 /// Elsewhere no elevation is needed (Linux: a seat's Steam is a folder of the user's own): the step runs as a child.
 #[cfg(not(windows))]
-fn elevate(args: &[String]) -> Result<i32, String> {
+pub fn elevate(args: &[String]) -> Result<i32, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let status = std::process::Command::new(exe).args(args).status().map_err(|e| e.to_string())?;
     Ok(status.code().unwrap_or(1))
