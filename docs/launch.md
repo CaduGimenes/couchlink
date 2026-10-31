@@ -103,7 +103,7 @@ Data only. Built-ins live in `recipes/`; user ones in `<state>/recipes/`.
 
 Template variables: `$SEAT` (0..7), `$PLAYER` (name), `$PLAYERS` (how many players this session has, the same for every seat), `$WIDTH` `$HEIGHT` `$X` `$Y` (region in desktop pixels), `$GAMEDIR`
 (this copy's folder), `$NITROX` (recipe-specific paths resolved by the runner), `$STEAMID` (goldberg), `$USERPROFILE`
-`$DOCUMENTS` `$APPDATA` `$LOCALAPPDATA` (folders of this PC), the recipe's `vars` and `find` names, and every option name.
+`$DOCUMENTS` `$APPDATA` `$LOCALAPPDATA` (folders of this PC), the recipe's `vars` and `find` names, and every option name. A `find` entry may have a `hint`: what the player does when it is not found, shown as a setup step in the Library and as the error when a session starts without it.
 `$$` is a literal dollar sign. A template that is the same for every seat (a shared edit, a shared registry value, a shared
 helper) may not use the per-seat variables (`$SEAT $PLAYER $WIDTH $HEIGHT $X $Y $STEAMID`, and `$GAMEDIR` except for shared helpers,
 which get the real game folder); the recipe is refused when it does, and says to set `per_seat`.

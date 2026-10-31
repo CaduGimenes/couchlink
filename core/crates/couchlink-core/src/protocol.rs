@@ -150,6 +150,9 @@ pub enum Command {
         /// The player's choices for the recipe's `options`: name to chosen value. Left out: the defaults.
         #[serde(default)]
         options: BTreeMap<String, String>,
+        /// Start the game without its recipe: its own program, a copy per player, none of the recipe's setup.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        plain: bool,
     },
     StopSession,
     /// Seats 2 and up with their own Steam account: list, set up (one Windows prompt), start its Steam, remove.
@@ -401,10 +404,14 @@ mod tests {
             Command::SetGameProgram { recipe: "try-steam-239140".into(), exe: Some("DyingLightGame.exe".into()) }
         );
         assert_eq!(parse(json!({"id": 24, "cmd": "set_game_program", "recipe": "try-steam-239140"})).cmd, Command::SetGameProgram { recipe: "try-steam-239140".into(), exe: None });
-        assert_eq!(parse(json!({"id": 21, "cmd": "start_session", "recipe": "testgame"})).cmd, Command::StartSession { recipe: "testgame".into(), options: BTreeMap::new() });
+        assert_eq!(parse(json!({"id": 21, "cmd": "start_session", "recipe": "testgame"})).cmd, Command::StartSession { recipe: "testgame".into(), options: BTreeMap::new(), plain: false });
         assert_eq!(
             parse(json!({"id": 23, "cmd": "start_session", "recipe": "g", "options": {"FPS": "Yes"}})).cmd,
-            Command::StartSession { recipe: "g".into(), options: BTreeMap::from([("FPS".to_string(), "Yes".to_string())]) }
+            Command::StartSession { recipe: "g".into(), options: BTreeMap::from([("FPS".to_string(), "Yes".to_string())]), plain: false }
+        );
+        assert_eq!(
+            parse(json!({"id": 25, "cmd": "start_session", "recipe": "fallout-new-vegas-coop", "plain": true})).cmd,
+            Command::StartSession { recipe: "fallout-new-vegas-coop".into(), options: BTreeMap::new(), plain: true }
         );
         assert_eq!(parse(json!({"id": 22, "cmd": "stop_session"})).cmd, Command::StopSession);
         assert_eq!(parse(json!({"id": 15, "cmd": "list_profiles"})).cmd, Command::ListProfiles);

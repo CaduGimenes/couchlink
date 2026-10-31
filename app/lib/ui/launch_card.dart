@@ -17,14 +17,14 @@ import 'sample_data.dart';
 /// The Play button: asks couchlinkd to start [game] with the seats that are taken, and opens the
 /// launch card. The daemon's refusal ("open the Nitrox launcher and press Play Multiplayer once...")
 /// is already written for players, so it goes to a toast as it is. While a session runs, Play only
-/// brings the card back.
-Future<void> playGame(BuildContext context, LibraryGame game) async {
+/// brings the card back. [plain] starts the game without its recipe, so its setup steps do not matter.
+Future<void> playGame(BuildContext context, LibraryGame game, {bool plain = false}) async {
   final scope = Scope.of(context);
   if (scope.client.session.isLive) {
     scope.ui.openLaunch();
     return;
   }
-  if (game.installed && !game.ready) {
+  if (game.installed && !game.ready && !plain) {
     scope.ui.go(AppView.library);
     scope.ui.selectGame(game.id, openSheet: true);
     scope.toaster.show(t('One-time setup first, then Play'));
@@ -36,7 +36,7 @@ Future<void> playGame(BuildContext context, LibraryGame game) async {
     scope.ui.go(AppView.players);
     return;
   }
-  final err = await scope.client.startSession(game.recipe);
+  final err = await scope.client.startSession(game.recipe, plain: plain);
   if (err != null) {
     scope.toaster.show(err, error: true);
     return;

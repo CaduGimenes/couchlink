@@ -482,6 +482,24 @@ class _GameSheetState extends State<GameSheet> {
                                   const SizedBox(height: 14),
                                   CButton(key: const ValueKey('sheet-recheck'), label: t('Check again'), primary: true, onTap: () => runCmd(context, scope.client.listGames)),
                                 ],
+                                if (g.installed && (g.tier == Tier.recipe || g.tier == Tier.sdk)) ...[
+                                  const SizedBox(height: 20),
+                                  Text(t('Plain split screen'), key: const ValueKey('sheet-plain-title'), style: txt(context, size: 13, weight: FontWeight.w600)),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    t('Starts the game’s own program, one copy per player, without this recipe’s mods or setup. Use it with another co-op mod you installed yourself, or to play split screen without one.'),
+                                    style: txt(context, size: 13, color: c.ink2),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  CButton(
+                                    key: const ValueKey('sheet-plain'),
+                                    label: t('Start without the recipe'),
+                                    onTap: () {
+                                      ui.closeSheet();
+                                      playGame(context, g, plain: true);
+                                    },
+                                  ),
+                                ],
                               ],
                             ),
                           ),

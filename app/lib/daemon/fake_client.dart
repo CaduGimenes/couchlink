@@ -134,6 +134,9 @@ class FakeClient extends CouchClient {
 
   /// Tests: how many times the UI called [startSession] / [stopSession], and with what.
   final List<String> startedRecipes = [];
+
+  /// Tests: the recipes of the starts that asked for a plain split screen (also in [startedRecipes]).
+  final List<String> plainStarts = [];
   int stops = 0;
 
   @override
@@ -217,8 +220,9 @@ class FakeClient extends CouchClient {
   }
 
   @override
-  Future<String?> startSession(String recipe) async {
+  Future<String?> startSession(String recipe, {bool plain = false}) async {
     startedRecipes.add(recipe);
+    if (plain) plainStarts.add(recipe);
     if (startError != null) return startError;
     if (_session.isLive) return 'A game is already running. End it first.';
     final game = _games.where((g) => g.recipe == recipe).firstOrNull;

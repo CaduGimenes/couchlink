@@ -310,6 +310,15 @@ pub fn try_recipe_with(id: &str, name: &str, exe: &str, app_id: Option<u32>) -> 
     Recipe::parse(&v.to_string()).ok()
 }
 
+/// A plain split screen for a game that has a recipe: the "Try it" recipe for the game's own program (`match.exe`,
+/// or Couchlink's guess when the recipe names none), under the recipe's id. The recipe's launcher, `requires`,
+/// `edits`, helpers and other setup are left out, so the player can start the game with mods of their own choosing.
+pub fn plain_recipe(r: &Recipe, game_dir: &Path) -> Option<Recipe> {
+    let named = r.matching.exe.as_deref().map(|e| e.replace('\\', "/")).filter(|e| game_dir.join(e).is_file());
+    let exe = named.or_else(|| guess_exe_named(game_dir, &r.game))?;
+    try_recipe_with(&r.id, &r.game, &exe, r.matching.steam_app_id)
+}
+
 /// The programs the player picked for "Try it" games (`<state>/programs.json`: recipe id to program, relative to the
 /// game folder).
 pub fn picked_programs(state_dir: &Path) -> std::collections::BTreeMap<String, String> {
@@ -417,16 +426,19 @@ pub fn resolve_finds(state_dir: &Path, recipe: &Recipe) -> Result<std::collectio
     let machine = machine_vars();
     let mut out = std::collections::BTreeMap::new();
     for (name, f) in &recipe.find {
-        let given = set.get(name).map(PathBuf::from).filter(|d| d.join(&f.file).is_file());
-        let found = given.or_else(|| {
-            f.near.iter().filter_map(|n| couchlink_core::recipe::expand(n, &machine).ok()).find_map(|n| search(Path::new(&n), &f.file, f.depth))
-        });
-        let dir = found.ok_or_else(|| {
-            format!("{} needs {} and Couchlink could not find it. Set \"{name}\" under \"vars\" for {} in games.json", recipe.game, f.file, recipe.id)
+        let dir = find_one(&set, &machine, name, f).ok_or_else(|| match &f.hint {
+            Some(hint) => format!("{}: {hint}", recipe.game),
+            None => format!("{} needs {} and Couchlink could not find it. Set \"{name}\" under \"vars\" for {} in games.json", recipe.game, f.file, recipe.id),
         })?;
         out.insert(name.clone(), dir.display().to_string().replace('$', "$$"));
     }
     Ok(out)
+}
+
+/// The folder for one `find` entry: the one games.json sets when it holds the file, else the first `near` hit.
+fn find_one(set: &std::collections::BTreeMap<String, String>, machine: &std::collections::BTreeMap<String, String>, name: &str, f: &couchlink_core::recipe::Find) -> Option<PathBuf> {
+    let given = set.get(name).map(PathBuf::from).filter(|d| d.join(&f.file).is_file());
+    given.or_else(|| f.near.iter().filter_map(|n| couchlink_core::recipe::expand(n, machine).ok()).find_map(|n| search(Path::new(&n), &f.file, f.depth)))
 }
 
 /// Breadth-first look for `file` under `root`, at most `depth` folders down and a bounded number of
@@ -453,27 +465,39 @@ fn search(root: &Path, file: &str, depth: u8) -> Option<PathBuf> {
 }
 
 /// Where the game is installed, if a locator finds it and the folder looks right (it exists and holds
-/// the exe the recipe launches; on Linux its `linux.exe` when it has one).
+/// the exe the recipe launches, on Linux its `linux.exe` when it has one, or the game's own `match.exe`: a folder
+/// without the recipe's launcher is still the game, and can start without the recipe).
 pub fn locate(locators: &[Locator], recipe: &Recipe) -> Option<PathBuf> {
     let dir = locators.iter().find_map(|l| l(recipe))?;
     if !dir.is_dir() {
         return None;
     }
-    let native = recipe.linux.as_ref().and_then(|l| l.exe.as_ref()).filter(|_| cfg!(target_os = "linux"));
-    let exe = native.unwrap_or(&recipe.launch.exe);
-    if !exe.contains('$') && !dir.join(exe).is_file() && !Path::new(exe).is_file() {
+    let own = recipe.matching.exe.as_deref().is_some_and(|e| dir.join(e).is_file());
+    if !own && !launch_exe_present(&dir, recipe) {
         return None;
     }
     Some(dir)
 }
 
-pub fn game_info(locators: &[Locator], r: &Recipe) -> GameInfo {
+/// True when the program the recipe launches is in the game folder (or is a full path to a file, or still a template).
+pub fn launch_exe_present(dir: &Path, recipe: &Recipe) -> bool {
+    let native = recipe.linux.as_ref().and_then(|l| l.exe.as_ref()).filter(|_| cfg!(target_os = "linux"));
+    let exe = native.unwrap_or(&recipe.launch.exe);
+    exe.contains('$') || dir.join(exe).is_file() || Path::new(exe).is_file()
+}
+
+pub fn game_info(locators: &[Locator], state_dir: &Path, r: &Recipe) -> GameInfo {
     let path = locate(locators, r);
-    let setup = r
-        .requires
-        .iter()
-        .map(|q| couchlink_core::SetupStep { text: q.hint.clone(), done: path.as_deref().is_some_and(|p| require_met(p, q)) })
-        .collect();
+    // A helper the recipe looks for (`find` with a `hint`) is a setup step too, before the game folder's own steps. It
+    // is only searched for once the game is installed.
+    let set = games_json_vars(state_dir, &r.id);
+    let machine = machine_vars();
+    let finds = r.find.iter().filter_map(|(name, f)| {
+        let hint = f.hint.clone()?;
+        Some(couchlink_core::SetupStep { text: hint, done: path.is_some() && find_one(&set, &machine, name, f).is_some() })
+    });
+    let requires = r.requires.iter().map(|q| couchlink_core::SetupStep { text: q.hint.clone(), done: path.as_deref().is_some_and(|p| require_met(p, q)) });
+    let setup = finds.chain(requires).collect();
     GameInfo {
         recipe: r.id.clone(),
         game: r.game.clone(),
@@ -613,12 +637,12 @@ mod tests {
         assert!(locate(&locators, &r).is_none(), "no games.json yet");
         std::fs::write(state.join("games.json"), serde_json::json!({ "a": game.display().to_string() }).to_string()).unwrap();
         assert_eq!(locate(&locators, &r), Some(game.clone()));
-        let info = game_info(&locators, &r);
+        let info = game_info(&locators, &state, &r);
         assert!(info.installed && info.path.is_some() && info.players == [1, 2]);
         // The folder must hold the exe.
         let other = Recipe::parse(&recipe_json("a", "A", "missing.exe")).unwrap();
         assert!(locate(&locators, &other).is_none());
-        assert!(!game_info(&locators, &other).installed);
+        assert!(!game_info(&locators, &state, &other).installed);
         let _ = std::fs::remove_dir_all(&state);
         let _ = std::fs::remove_dir_all(&game);
     }
