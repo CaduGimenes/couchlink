@@ -203,6 +203,17 @@ impl GoldbergOptions {
         Ok(o)
     }
 
+    /// The player's per-game overlay choice (Shift+Tab) applied over the recipe's settings: on asks for the experimental
+    /// build for every seat (and the loader's overlay injection in steamclient mode), off for the regular build. In
+    /// steamclient mode the experimental client has an overlay of its own, so off also switches it off for every seat.
+    pub fn with_overlay(mut self, on: bool) -> GoldbergOptions {
+        self.experimental = on;
+        self.overlay_on_seats = None;
+        self.overlay_off_seats = (!on && self.experimental_client).then_some(SeatSelector::All);
+        self.force_inject_overlay = on;
+        self
+    }
+
     /// Reject values that would not be safe or meaningful in the files. `prepare_full` calls this before it
     /// touches any file.
     pub fn validate(&self) -> Result<()> {
@@ -412,6 +423,20 @@ mod tests {
         assert_eq!(off.overlay_for(0), None, "an explicit choice wins");
         assert_eq!(off.overlay_for(1), Some(false));
         assert_eq!(GoldbergOptions::default().overlay_for(0), None);
+    }
+
+    #[test]
+    fn the_players_overlay_choice_wins_over_the_recipe() {
+        let recipe = GoldbergOptions::from_recipe(&serde_json::json!({"experimental": true, "disable_overlay_seats": "1+"})).unwrap();
+        let on = recipe.clone().with_overlay(true);
+        assert!(on.experimental && on.force_inject_overlay);
+        assert_eq!(on.overlay_for(1), Some(true), "the recipe's per-seat switch-off no longer applies");
+        let off = recipe.with_overlay(false);
+        assert!(!off.experimental && !off.force_inject_overlay);
+        assert_eq!(off.overlay_for(0), None, "the regular build has no overlay settings to write");
+        assert!(overlay_ini(0, &off).is_none());
+        let client = GoldbergOptions { experimental_client: true, ..Default::default() }.with_overlay(false);
+        assert_eq!(overlay_ini(2, &client).unwrap(), "[overlay::general]\nenable_experimental_overlay=0\n");
     }
 
     #[test]

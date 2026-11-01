@@ -495,6 +495,7 @@ class GameInfo {
     this.setup = const [],
     this.controls = false,
     this.native = false,
+    this.overlay = false,
     this.tips = const [],
     this.installs = const [],
   });
@@ -526,11 +527,33 @@ class GameInfo {
   /// One copy for every player: the game splits the screen itself (`mode: native`).
   final bool native;
 
+  /// Each copy gets the in-game overlay (Shift+Tab) at the next start; only Goldberg games have one.
+  final bool overlay;
+
   /// How to play, in plain sentences.
   final List<String> tips;
 
   /// What Couchlink puts in place for each session, with where it comes from.
   final List<InstallInfo> installs;
+
+  /// The same game with the overlay setting [on] (for a client that keeps the list itself).
+  GameInfo withOverlay(bool on) => GameInfo(
+        recipe: recipe,
+        game: game,
+        installed: installed,
+        path: path,
+        minPlayers: minPlayers,
+        maxPlayers: maxPlayers,
+        steam: steam,
+        source: source,
+        steamAppId: steamAppId,
+        setup: setup,
+        controls: controls,
+        native: native,
+        overlay: on,
+        tips: tips,
+        installs: installs,
+      );
 
   factory GameInfo.fromJson(Map<String, dynamic> j) {
     final p = j['players'];
@@ -558,6 +581,7 @@ class GameInfo {
       ],
       controls: j['controls'] == true,
       native: j['mode'] == 'native',
+      overlay: j['overlay'] == true,
       tips: [if (j['tips'] is List) for (final x in j['tips'] as List) if (x is String) x],
       installs: [
         if (j['installs'] is List)

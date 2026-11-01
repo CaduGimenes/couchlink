@@ -459,6 +459,12 @@ const Map<String, String> ruStrings = {
   'Couchlink could not find this game on this PC. Install it with Steam, then check again.': 'Couchlink не нашёл эту игру на этом ПК. Установите её через Steam и проверьте снова.',
   'Couchlink could not find this game on this PC. Install it, then check again.': 'Couchlink не нашёл эту игру на этом ПК. Установите её и проверьте снова.',
   'Before your first game': 'Перед первой игрой',
+  'Game settings': 'Настройки игры',
+  'In-game overlay (Shift+Tab)': 'Оверлей в игре (Shift+Tab)',
+  'Experimental': 'Экспериментально',
+  'Each player’s copy gets an overlay on Shift+Tab: friends, invites and achievements, for that player only. A few games crash with it; turn it off if yours does.':
+      'У копии каждого игрока появляется оверлей по Shift+Tab: друзья, приглашения и достижения, только для этого игрока. В нескольких играх с ним бывают вылеты; если у вас так, выключите его.',
+  'Changing it takes effect from the next start.': 'Изменение действует со следующего запуска.',
   'Plain split screen': 'Простой разделённый экран',
   'Start without the recipe': 'Запустить без рецепта',
   'Starts the game’s own program, one copy per player, without this recipe’s mods or setup. Use it with another co-op mod you installed yourself, or to play split screen without one.':

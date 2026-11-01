@@ -456,6 +456,13 @@ class DaemonClient extends CouchClient {
   }
 
   @override
+  Future<String?> setGameOverlay(String recipe, bool? on) async {
+    final err = await _cmd('set_game_overlay', {'recipe': recipe, 'on': on});
+    if (err == null) await listGames();
+    return err;
+  }
+
+  @override
   Future<String?> startSession(String recipe, {bool plain = false}) => _cmd('start_session', {'recipe': recipe, if (plain) 'plain': true});
 
   @override

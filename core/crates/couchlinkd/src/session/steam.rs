@@ -30,10 +30,7 @@ impl Prepare for SteamPrepare {
         vars.insert("STEAMID".to_string(), steam_id.clone());
         let exe = expand(&ctx.recipe.launch.exe, &vars)?;
         let args = split_args(ctx.recipe.launch.args_for(ctx.seat.seat)).iter().map(|a| expand(a, &vars)).collect::<Result<Vec<_>, _>>()?;
-        let goldberg = match &ctx.recipe.goldberg {
-            Some(g) => couchlink_steam::GoldbergOptions::from_recipe(g).map_err(|e| e.user_message())?,
-            None => Default::default(),
-        };
+        let goldberg = goldberg_options(ctx.recipe, ctx.overlay)?;
         let opts = couchlink_steam::PrepareOptions {
             goldberg,
             game_launch: Some(couchlink_steam::GameLaunch {
@@ -58,6 +55,19 @@ impl Prepare for SteamPrepare {
         }
         Ok(prep)
     }
+}
+
+/// The recipe's gbe_fork settings with the player's overlay choice (Shift+Tab) applied: on uses the experimental
+/// `steam_api` build, off the regular one. No choice leaves the recipe's own settings.
+fn goldberg_options(recipe: &couchlink_core::Recipe, overlay: Option<bool>) -> Result<couchlink_steam::GoldbergOptions, String> {
+    let g = match &recipe.goldberg {
+        Some(g) => couchlink_steam::GoldbergOptions::from_recipe(g).map_err(|e| e.user_message())?,
+        None => Default::default(),
+    };
+    Ok(match overlay {
+        Some(on) => g.with_overlay(on),
+        None => g,
+    })
 }
 
 /// The recipe's `fetch` files (a mod the game needs), downloaded once into the cache and put into this seat's folder
@@ -192,4 +202,26 @@ pub fn undoers() -> Undoers {
         couchlink_steam::undo(&u).map_err(|e| e.to_string())
     });
     undoers
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn recipe(goldberg: serde_json::Value) -> couchlink_core::Recipe {
+        couchlink_core::Recipe::parse(
+            &serde_json::json!({"schema": 1, "id": "g", "game": "G", "match": {"steamAppId": 480}, "steam": "goldberg", "goldberg": goldberg, "launch": {"exe": "g.exe"}, "players": [2, 4]}).to_string(),
+        )
+        .expect("valid recipe")
+    }
+
+    #[test]
+    fn the_overlay_choice_picks_the_steam_api_build() {
+        let plain = recipe(serde_json::json!({}));
+        let asks = recipe(serde_json::json!({"experimental": true}));
+        assert!(!goldberg_options(&plain, None).unwrap().experimental, "no choice: the recipe's own build");
+        assert!(goldberg_options(&asks, None).unwrap().experimental);
+        assert!(goldberg_options(&plain, Some(true)).unwrap().experimental, "on: the experimental build for every copy");
+        assert!(!goldberg_options(&asks, Some(false)).unwrap().experimental, "off: the regular build, whatever the recipe asks");
+    }
 }

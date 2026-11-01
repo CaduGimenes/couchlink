@@ -172,6 +172,39 @@ void main() {
     expect(find.descendant(of: byKey('program-current'), matching: find.text('DyingLightGame.exe'), matchRoot: true), findsOneWidget);
   });
 
+  testWidgets('a Goldberg game has an in-game overlay switch; a game on real Steam has none', (tester) async {
+    final fake = fastFake(games: const [
+      GameInfo(recipe: 'b2', game: 'Borderlands 2', installed: true, path: 'C:/b2', minPlayers: 2, maxPlayers: 4, steam: 'goldberg'),
+      GameInfo(recipe: 'sworn', game: 'Sworn', installed: true, path: 'C:/sworn', minPlayers: 2, maxPlayers: 4, steam: 'shared'),
+    ]);
+    await pumpApp(tester, fake, view: AppView.library, size: const Size(1400, 1300));
+    await tester.ensureVisible(byKey('game-sworn'));
+    await settle(tester);
+    await tester.tap(byKey('game-sworn'));
+    await settle(tester);
+    expect(byKey('game-overlay'), findsNothing);
+
+    await tester.tap(byKey('sheet-close'));
+    await settle(tester);
+    await tester.ensureVisible(byKey('game-b2'));
+    await tester.tap(byKey('game-b2'));
+    await settle(tester);
+    await tester.ensureVisible(byKey('game-overlay'));
+    expect(find.text('In-game overlay (Shift+Tab)'), findsOneWidget);
+    expect(find.text('Experimental'), findsOneWidget);
+    expect(find.text('Changing it takes effect from the next start.'), findsOneWidget);
+    expect(tester.widget<Switch>(byKey('game-overlay')).value, isFalse);
+
+    await tester.tap(byKey('game-overlay'));
+    await settle(tester);
+    expect(fake.overlayChoices['b2'], isTrue);
+    expect(tester.widget<Switch>(byKey('game-overlay')).value, isTrue);
+    await tester.tap(byKey('game-overlay'));
+    await settle(tester);
+    expect(fake.overlayChoices['b2'], isFalse);
+    expect(tester.widget<Switch>(byKey('game-overlay')).value, isFalse);
+  });
+
   testWidgets('Add a game takes any program, shows it under Try it, and Remove forgets it', (tester) async {
     final fake = fastFake(games: const []);
     await pumpApp(tester, fake, view: AppView.library, size: const Size(1400, 1300));
