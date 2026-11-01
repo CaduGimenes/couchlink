@@ -154,6 +154,36 @@ fn own_account(ctx: &PrepareCtx) -> Result<SeatPrep, String> {
     Ok(prep)
 }
 
+/// The online-fix files (`OnlineFix64.dll`, `OnlineFix.ini`) a game's folder has: such a game plays online on the real
+/// Steam running on the PC, under Steam's shared test app id. `Some` holds the app id its `OnlineFix.ini` names
+/// (`FakeAppId`), when it names one.
+pub fn online_fix(game_dir: &std::path::Path) -> Option<Option<u32>> {
+    fn walk(dir: &std::path::Path, depth: usize, found: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            match e.file_type() {
+                Ok(t) if t.is_dir() && depth < 4 => walk(&e.path(), depth + 1, found),
+                Ok(t) if !t.is_dir() && name.starts_with("onlinefix") && (name.ends_with(".dll") || name.ends_with(".ini")) => found.push(e.path()),
+                _ => {}
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(game_dir, 0, &mut found);
+    if found.is_empty() {
+        return None;
+    }
+    let ini = found.iter().filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("ini"))).find_map(|p| std::fs::read_to_string(p).ok());
+    let id = ini.and_then(|t| {
+        t.lines().find_map(|l| {
+            let (k, v) = l.split_once('=')?;
+            k.trim().eq_ignore_ascii_case("FakeAppId").then(|| v.trim().parse().ok()).flatten()
+        })
+    });
+    Some(id)
+}
+
 /// Undoers with the Steam layer's entry registered.
 pub fn undoers() -> Undoers {
     let undoers = Undoers::new();

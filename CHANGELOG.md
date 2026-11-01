@@ -3,6 +3,15 @@
 What changed in each Couchlink release. Downloads and older notes are on the
 [releases page](https://github.com/cranebeaker/couchlink/releases).
 
+## 0.1.12
+
+### Fixed
+
+- **Games with online-fix play on each player's own Steam account.** A game whose folder has online-fix
+  (`OnlineFix64.dll` or `OnlineFix.ini`) talks to the Steam running on the PC, so before every copy ended up on
+  player 1's account. Couchlink now treats such a game like a Steam game: every player who has their own Steam
+  account set up (Players, "Own Steam account") plays on it, under the app id online-fix names.
+
 ## 0.1.11
 
 ### Fixed

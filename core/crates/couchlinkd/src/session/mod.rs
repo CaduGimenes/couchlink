@@ -236,7 +236,8 @@ impl Config {
         let game_dir = recipes::locate(&self.deps.locators, &recipe)
             .ok_or_else(|| format!("{} is not installed, or Couchlink cannot find it (add its folder to games.json in the state folder)", recipe.game))?;
         if plain {
-            let recipe = recipes::plain_recipe(&recipe, &game_dir).ok_or_else(|| format!("no program to start was found in the folder of {} ({})", recipe.game, game_dir.display()))?;
+            let mut recipe = recipes::plain_recipe(&recipe, &game_dir).ok_or_else(|| format!("no program to start was found in the folder of {} ({})", recipe.game, game_dir.display()))?;
+            online_fix_steam(&mut recipe, &game_dir);
             let seats = plan_seats(state, &recipe, dev)?;
             let fps_limit = (state.fps_limit > 0).then_some(state.fps_limit);
             return Ok(Plan { recipe, game_dir, seats, state_dir: self.state_dir.clone(), options: BTreeMap::new(), fps_limit });
@@ -265,6 +266,7 @@ impl Config {
             recipe.files.link = couchlink_core::recipe::LinkMode::None;
             recipe.input = couchlink_core::recipe::Input { xinput: false, dinput: false, rawinput: false };
         }
+        online_fix_steam(&mut recipe, &game_dir);
         let seats = plan_seats(state, &recipe, dev)?;
         if matches!(recipe.steam, couchlink_core::recipe::SteamMode::Goldberg | couchlink_core::recipe::SteamMode::Accounts) && self.deps.prepare.is_none() {
             return Err(format!("{} needs Steam mode {:?}, which this build of Couchlink cannot set up yet", recipe.game, recipe.steam));
@@ -339,6 +341,23 @@ pub fn spawn_recover(config: Config, report: Report) -> Result<Handle, String> {
     Ok(Handle { stop })
 }
 
+/// A game with online-fix talks to the Steam running on the PC, so each player with their own Steam account plays on
+/// it, as in a Steam game. It does so under online-fix's app id, not the game's own.
+fn online_fix_steam(recipe: &mut Recipe, game_dir: &Path) {
+    use couchlink_core::recipe::SteamMode;
+    if !matches!(recipe.steam, SteamMode::None | SteamMode::Shared) {
+        return;
+    }
+    let Some(id) = steam::online_fix(game_dir) else { return };
+    crate::logfile::write("info", &format!("{} has online-fix: each player with their own Steam account plays on it", recipe.game));
+    recipe.steam = SteamMode::Shared;
+    if let Some(id) = id {
+        for k in ["SteamAppId", "SteamGameId"] {
+            recipe.launch.env.entry(k.to_string()).or_insert_with(|| id.to_string());
+        }
+    }
+}
+
 /// True when the journal in `state_dir` holds changes that were never undone.
 pub fn journal_pending(state_dir: &Path) -> bool {
     let (journal, _) = Journal::open(&state_dir.join("journal.json"));
@@ -378,6 +397,29 @@ mod tests {
             "screens": [{ "display": "disp:1", "on": true, "seats": [0, 1], "regions": [[0.0, 0.0, 0.5, 1.0], [0.5, 0.0, 0.5, 1.0]] }]
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn a_game_with_online_fix_plays_on_each_players_own_steam_under_its_app_id() {
+        use couchlink_core::recipe::SteamMode;
+        let game = temp("onlinefix");
+        std::fs::create_dir_all(game.join("Game/Binaries/Win64")).unwrap();
+        std::fs::write(game.join("Game/Binaries/Win64/Game.exe"), b"MZ").unwrap();
+        let mut plain = recipes::try_recipe_with("own-game", "Game", "Game/Binaries/Win64/Game.exe", None).unwrap();
+        online_fix_steam(&mut plain, &game);
+        assert_eq!(plain.steam, SteamMode::None, "no online-fix: Steam stays out of it");
+
+        std::fs::write(game.join("Game/Binaries/Win64/OnlineFix64.dll"), b"MZ").unwrap();
+        std::fs::write(game.join("Game/Binaries/Win64/OnlineFix.ini"), "[Main]\nRealAppId=1763250\nFakeAppId = 480\n").unwrap();
+        assert_eq!(steam::online_fix(&game), Some(Some(480)));
+        online_fix_steam(&mut plain, &game);
+        assert_eq!(plain.steam, SteamMode::Shared);
+        assert_eq!(plain.launch.env.get("SteamAppId").map(String::as_str), Some("480"));
+        assert_eq!(plain.launch.env.get("SteamGameId").map(String::as_str), Some("480"));
+
+        std::fs::remove_file(game.join("Game/Binaries/Win64/OnlineFix.ini")).unwrap();
+        assert_eq!(steam::online_fix(&game), Some(None), "the dll alone still counts");
+        let _ = std::fs::remove_dir_all(&game);
     }
 
     #[test]

@@ -189,6 +189,7 @@ mod tests {
     fn versions_compare_as_numbers_and_dev_builds_come_first() {
         assert!(newer("0.1.10", "0.1.9"));
         assert!(newer("0.1.11", "0.1.10"));
+        assert!(newer("0.1.12", "0.1.11"));
         assert!(newer("v0.2.0", "0.1.9"));
         assert!(newer("0.1.4", "0.1.4-dev"));
         assert!(!newer("0.1.3", "0.1.4"));
