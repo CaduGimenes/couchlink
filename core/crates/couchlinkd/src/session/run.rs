@@ -808,6 +808,21 @@ impl Run {
             }
             // A copy that replaced its window (splash screen to game) keeps the same priority as the others.
             self.placer.even_out();
+            self.keep_focus_off_copies();
+        }
+    }
+
+    /// A click into a copy makes it the window in front again, and Windows then favours it: the other copies drop
+    /// frames. Every copy believes it has the focus anyway (the hook), so the focus goes back to the desktop. Not when
+    /// someone plays on the desktop's own keyboard and mouse, who needs the real focus.
+    fn keep_focus_off_copies(&mut self) {
+        if self.seats.iter().any(|s| s.plan.devices.iter().any(|d| d == "kbm:system")) {
+            return;
+        }
+        let Some(front) = super::window::foreground_pid() else { return };
+        let copy = |s: &SeatRun| !s.exited && (s.window_pid == Some(front) || s.child.as_ref().is_some_and(|c| c.pid() == front));
+        if self.seats.iter().any(copy) {
+            self.placer.release_focus();
         }
     }
 

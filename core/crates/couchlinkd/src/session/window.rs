@@ -123,6 +123,25 @@ pub fn pick_process(procs: &[ProcInfo], root: u32, wanted: &str, started_after: 
     procs.iter().filter(hit).find(|(pid, _, _)| started_after(*pid)).map(|(pid, _, _)| *pid)
 }
 
+/// The process of the window in front, where the platform tells (Windows).
+pub fn foreground_pid() -> Option<u32> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+        // SAFETY: plain calls; a null window gives pid 0.
+        let pid = unsafe {
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(GetForegroundWindow(), &mut pid);
+            pid
+        };
+        (pid != 0).then_some(pid)
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
 /// Look for the process behind a launched copy's window (see `pick_process`). `since` is when the copy was launched.
 pub fn find_window_process(root: u32, wanted: &str, since: std::time::SystemTime, claimed: &[u32]) -> Option<u32> {
     #[cfg(windows)]
