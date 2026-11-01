@@ -3,6 +3,34 @@
 What changed in each Couchlink release. Downloads and older notes are on the
 [releases page](https://github.com/cranebeaker/couchlink/releases).
 
+## 0.1.13
+
+### New
+
+- **Steam's overlay (Shift+Tab) in games on real Steam.** Couchlink starts each copy itself, so Steam never put
+  its overlay in. Now each copy loads Steam's own overlay, also for players on their own Steam account, so Shift+Tab
+  opens friends, invites and achievements for that player. On by default; each game's page has a switch to turn it
+  off. Games on the Steam emulator have the same switch for its overlay.
+- **Saved layouts.** In the screen editor, "Save layout" keeps the screen as it is, gaps included. Keep as many as
+  you like and put any of them on a screen in any game. A game's page can pin one, so that game always starts with
+  it.
+- **Close a player's own Steam.** Players, a player's Steam account: "Close their Steam". Settings, General:
+  "Close their Steam when a session ends". Your own Steam stays open.
+- **Show a cursor for each player** (Settings, Bindings): turn off Couchlink's extra cursor for games that draw their
+  own.
+- **Keyboards and mice only control the games while a game is in front** (Settings, Bindings, on by default):
+  typing in Discord or another app no longer reaches the games.
+
+### Fixed
+
+- **A game lost frames while another one was in front.** Windows gives the window in front more of the PC.
+  Couchlink already took the focus away from the games at the start; now it does so again whenever a game copy is
+  clicked into, so every copy runs alike. Not when someone plays on the desktop's own keyboard and mouse.
+- **Couchlink's cursor showed on top of other apps** after switching away from the game. It now stays with its game
+  window.
+- **Checking whether a player's own Steam runs took up to a minute** on some PCs, which also slowed starting games
+  with it. It is instant now.
+
 ## 0.1.12
 
 ### Fixed
