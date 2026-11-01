@@ -184,6 +184,10 @@ impl Hub {
                 let _ = m.set_window_keys(settings["front_keys"].as_str(), settings["hide_keys"].as_str());
                 let _ = m.set_host_control(settings["host_control"].as_bool(), settings["control_keys"].as_str());
                 session::rawkbm::set_host_control(m.host_control());
+                m.set_show_cursors(settings["show_cursors"].as_bool().unwrap_or(true));
+                session::rawkbm::set_show_cursors(m.show_cursors());
+                m.set_only_in_front(settings["only_in_front"].as_bool().unwrap_or(true));
+                session::rawkbm::set_only_in_front(m.only_in_front());
                 m
             },
             hotkey: crate::hotkey::spawn(self_tx.clone()),
@@ -623,6 +627,22 @@ impl Hub {
                     save_setting("control_keys", json!(self.model.control_keys()));
                     session::rawkbm::set_host_control(self.model.host_control());
                     self.apply_shortcut();
+                    self.changed();
+                }
+                Ok(none)
+            }
+            Command::SetShowCursors { on } => {
+                if self.model.set_show_cursors(on) {
+                    save_setting("show_cursors", json!(on));
+                    session::rawkbm::set_show_cursors(on);
+                    self.changed();
+                }
+                Ok(none)
+            }
+            Command::SetOnlyInFront { on } => {
+                if self.model.set_only_in_front(on) {
+                    save_setting("only_in_front", json!(on));
+                    session::rawkbm::set_only_in_front(on);
                     self.changed();
                 }
                 Ok(none)

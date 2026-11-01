@@ -87,6 +87,14 @@ pub enum Command {
         #[serde(default)]
         keys: Option<String>,
     },
+    /// Couchlink's own cursor for a player with a keyboard and mouse on or off; applies to copies started afterwards.
+    SetShowCursors {
+        on: bool,
+    },
+    /// Keyboards and mice control the games only while a game (or the desktop, or no window) is in front, on or off.
+    SetOnlyInFront {
+        on: bool,
+    },
     /// The close-the-games shortcut; either part may be left out to keep it.
     SetStopShortcut {
         #[serde(default)]
@@ -395,6 +403,8 @@ mod tests {
             assert_eq!(parse(json!({"id": 9, "cmd": "set_layout", "layout": s})).cmd, Command::SetLayout { layout: l });
         }
         assert_eq!(parse(json!({"id": 9, "cmd": "set_fps_limit", "fps": 30})).cmd, Command::SetFpsLimit { fps: 30 });
+        assert_eq!(parse(json!({"id": 9, "cmd": "set_show_cursors", "on": false})).cmd, Command::SetShowCursors { on: false });
+        assert_eq!(parse(json!({"id": 9, "cmd": "set_only_in_front", "on": true})).cmd, Command::SetOnlyInFront { on: true });
         assert_eq!(
             parse(json!({"id": 10, "cmd": "set_display_used", "display": "disp:1", "used": false})).cmd,
             Command::SetDisplayUsed { display: "disp:1".into(), used: false }
@@ -533,7 +543,7 @@ mod tests {
         let s = &v["state"];
         let mut keys: Vec<_> = s.as_object().unwrap().keys().cloned().collect();
         keys.sort();
-        assert_eq!(keys, ["control_keys", "dev", "devices", "displays", "fps_limit", "front_keys", "hide_keys", "host_control", "layout", "screens", "seats", "stop_keys", "stop_pad"]);
+        assert_eq!(keys, ["control_keys", "dev", "devices", "displays", "fps_limit", "front_keys", "hide_keys", "host_control", "layout", "only_in_front", "screens", "seats", "show_cursors", "stop_keys", "stop_pad"]);
         assert_eq!(s["layout"], "auto");
         assert_eq!(s["fps_limit"], 0);
         assert_eq!(s["dev"], false);
@@ -567,6 +577,8 @@ mod tests {
           "hide_keys": "off",
           "host_control": false,
           "control_keys": "Ctrl+Shift+K",
+          "show_cursors": false,
+          "only_in_front": false,
           "dev": false
         }"##;
         let state: State = serde_json::from_str(text).unwrap();
