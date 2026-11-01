@@ -672,6 +672,31 @@ pub fn attach_shared(name: &str, devices: &[String], share_with: Option<&str>) -
     Ok(KbmGuard { id, name: name.to_string() })
 }
 
+/// The seat a feed is for, from its name (`feed_name`).
+fn feed_seat(name: &str) -> Option<usize> {
+    name.rsplit('-').next()?.parse().ok()
+}
+
+/// The players moved keyboards or mice while copies run: every seat's feed takes the `kbd:` and `mouse:` devices
+/// `seats` now gives it (index = seat). A seat whose copy started without a feed of its own cannot get one now; the
+/// names of those seats come back, for the log.
+pub fn reassign(seats: &[Vec<String>]) -> Vec<usize> {
+    let mut reg = registry();
+    let mut fed = HashSet::new();
+    for s in reg.seats.iter_mut() {
+        // A pad's own feed carries only what its profile makes.
+        if s.devices.iter().any(|d| d == PAD_KBM_DEVICE) {
+            continue;
+        }
+        let Some(seat) = feed_seat(&s.name) else { continue };
+        fed.insert(seat);
+        s.devices = seats.get(seat).map(|d| feed_devices(d).into_iter().map(str::to_string).collect()).unwrap_or_default();
+    }
+    reg.update_handles();
+    let fed_any = !fed.is_empty();
+    (0..seats.len()).filter(|i| fed_any && !fed.contains(i) && !feed_devices(&seats[*i]).is_empty()).collect()
+}
+
 /// The device id a seat's pad-made keys and mouse input carry in its feed.
 pub const PAD_KBM_DEVICE: &str = "pad-kbm";
 
@@ -1345,6 +1370,29 @@ mod tests {
 
     fn test_pointer() -> Option<Pointer> {
         Some(Pointer { pid: POINTER_PID.load(std::sync::atomic::Ordering::Relaxed), x: 100, y: 50, w: 800, h: 600 })
+    }
+
+    // Needs the feed, which is Windows only (as above).
+    #[cfg(windows)]
+    #[test]
+    fn a_keyboard_moved_to_another_player_while_copies_run_goes_to_that_copy() {
+        let _l = test_lock();
+        test_reset();
+        let k = test_add_device(Kind::Keyboard, KBD1, 41);
+        let m = test_add_device(Kind::Mouse, MOUSE1, 42);
+        let a = test_attach("Local\\couchlink-kbm-unit-move-0", &[m.id.clone()]).expect("attach 0");
+        let b = test_attach("Local\\couchlink-kbm-unit-move-1", &[k.id.clone()]).expect("attach 1");
+        let head = |name: &str| registry().seats.iter().find(|s| s.name == name).unwrap().feed.head();
+        test_input(&k.id, Input::Key { vk: 0x41, scan: 0x1E, flags: 0 });
+        assert_eq!((head(a.name()), head(b.name())), (0, 1));
+        // The players swap: the keyboard is player 1's now, the mouse player 2's.
+        assert!(reassign(&[vec![k.id.clone()], vec![m.id.clone()]]).is_empty());
+        test_input(&k.id, Input::Key { vk: 0x41, scan: 0x1E, flags: 0 });
+        test_input(&m.id, Input::Mouse { dx: 1, dy: 0, flags: 0, wheel: 0 });
+        assert_eq!((head(a.name()), head(b.name())), (1, 2));
+        // A third player's copy started without a feed of its own: named, so the log can say so.
+        assert_eq!(reassign(&[vec![k.id.clone()], vec![], vec![m.id.clone()]]), [2]);
+        test_reset();
     }
 
     // Needs the feed, which is Windows only (as above).

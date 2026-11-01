@@ -121,7 +121,7 @@ pub fn start_steam_logged(cfg: &AccountsConfig, log: Option<&Path>) -> Result<u3
         None => (Stdio::null(), Stdio::null()),
     };
     let mut cmd = Command::new(&program);
-    cmd.args(&args).env("HOME", &home);
+    cmd.args(&args).envs(seat_env(&home, cfg));
     // Couchlink itself may run as a game of the desktop's Steam: none of that Steam's game environment (its overlay,
     // its runtime's libraries, the game's ids, Deck mode) is for this one.
     for (name, _) in std::env::vars_os() {
@@ -145,6 +145,18 @@ pub fn start_steam_logged(cfg: &AccountsConfig, log: Option<&Path>) -> Result<u3
         .spawn()
         .map_err(|e| SteamError::io(format!("start {}", program.display()), e))?;
     Ok(child.id())
+}
+
+/// The seat's Steam's own home, with the XDG folders inside it (a desktop that sets them would otherwise point the
+/// seat's Steam at the desktop Steam's config and cache) and a user name of its own, as a second client on one Linux
+/// user is started by hand (`HOME=... USER=... steam`).
+fn seat_env(home: &Path, cfg: &AccountsConfig) -> Vec<(String, String)> {
+    let user = format!("couchlink-seat{}", cfg.seat as u32 + 1);
+    let mut env = vec![("HOME".to_string(), home.display().to_string()), ("USER".to_string(), user.clone()), ("LOGNAME".to_string(), user)];
+    for (var, sub) in [("XDG_CONFIG_HOME", ".config"), ("XDG_DATA_HOME", ".local/share"), ("XDG_STATE_HOME", ".local/state"), ("XDG_CACHE_HOME", ".cache")] {
+        env.push((var.to_string(), home.join(sub).display().to_string()));
+    }
+    env
 }
 
 /// Environment a seat's Steam must not inherit: what a running Steam gives the games it starts (and Couchlink, when
@@ -225,6 +237,10 @@ mod tests {
         assert_ne!(program, cfg.steam_exe, "not the wrapper on PATH");
         assert_eq!(args, ["-master_ipc_name_override", "couchlink_seat2"]);
         assert!(!args.iter().any(|a| a == "-steamdeck" || a == "-gamepadui"));
+        let env: std::collections::BTreeMap<_, _> = seat_env(Path::new("/h/seat2"), &cfg).into_iter().collect();
+        assert_eq!(env["HOME"], "/h/seat2");
+        assert_eq!(env["XDG_DATA_HOME"], "/h/seat2/.local/share", "never the desktop's own XDG folders");
+        assert_eq!(env["USER"], "couchlink-seat2");
         for name in ["SteamAppId", "LD_PRELOAD", "LD_LIBRARY_PATH", "SteamDeck", "STEAM_COMPAT_DATA_PATH", "PRESSURE_VESSEL_FILESYSTEMS_RO"] {
             assert!(foreign_steam_env(name), "{name} is the desktop Steam's");
         }
