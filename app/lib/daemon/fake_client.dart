@@ -687,6 +687,78 @@ class FakeClient extends CouchClient {
     return null;
   }
 
+  // ---- saved screen layouts (the same rules as couchlinkd)
+
+  final List<LayoutInfo> _layouts = [];
+  final Map<String, String> _pins = {};
+  int _layoutSerial = 0;
+
+  /// Today for `saved`; tests set it to get a known date.
+  DateTime layoutClock = DateTime(2026, 11, 1, 12);
+
+  LayoutList _layoutList({LayoutInfo? saved}) => LayoutList(List.of(_layouts), pins: Map.of(_pins), saved: saved);
+
+  String? _checkLayoutName(String name, {String? except}) {
+    final n = name.trim();
+    if (n.isEmpty) return 'give the layout a name';
+    if (n.length > 40) return 'the name is longer than 40 characters';
+    if (_layouts.any((l) => l.id != except && l.name.toLowerCase() == n.toLowerCase())) return 'a layout called "$n" exists already';
+    return null;
+  }
+
+  @override
+  Future<LayoutList> listLayouts() async => _layoutList();
+
+  @override
+  Future<LayoutList> saveLayout(String name, ScreenArrangement screen) async {
+    final err = _checkLayoutName(name);
+    if (err != null) return LayoutList(const [], error: err);
+    if (screen.regions.isEmpty) return const LayoutList([], error: 'the screen has no players to save');
+    final layout = LayoutInfo(
+      id: 'l${++_layoutSerial}',
+      name: name.trim(),
+      display: screen.display,
+      regions: screen.regions,
+      shape: screen.shape,
+      custom: screen.custom,
+      sizes: screen.sizes,
+      present: screen.present,
+      saved: layoutClock.millisecondsSinceEpoch ~/ 1000,
+    );
+    _layouts.add(layout);
+    return _layoutList(saved: layout);
+  }
+
+  @override
+  Future<LayoutList> renameLayout(String layoutId, String name) async {
+    final i = _layouts.indexWhere((l) => l.id == layoutId);
+    if (i < 0) return const LayoutList([], error: 'no such layout');
+    final err = _checkLayoutName(name, except: layoutId);
+    if (err != null) return LayoutList(const [], error: err);
+    final l = _layouts[i];
+    _layouts[i] = LayoutInfo(id: l.id, name: name.trim(), display: l.display, regions: l.regions, shape: l.shape, custom: l.custom, sizes: l.sizes, present: l.present, saved: l.saved);
+    return _layoutList();
+  }
+
+  @override
+  Future<LayoutList> deleteLayout(String layoutId) async {
+    if (!_layouts.any((l) => l.id == layoutId)) return const LayoutList([], error: 'no such layout');
+    _layouts.removeWhere((l) => l.id == layoutId);
+    _pins.removeWhere((_, v) => v == layoutId);
+    return _layoutList();
+  }
+
+  @override
+  Future<LayoutList> setGameLayout(String recipe, String? layoutId) async {
+    if (layoutId == null) {
+      _pins.remove(recipe);
+    } else {
+      if (!_layouts.any((l) => l.id == layoutId)) return const LayoutList([], error: 'no such layout');
+      _pins[recipe] = layoutId;
+    }
+    return _layoutList();
+  }
+
   @override
   Future<void> subscribeInput(bool on) async {
     final was = _subscribed;

@@ -524,6 +524,31 @@ class DaemonClient extends CouchClient {
   @override
   Future<String?> deleteProfile(String profileId) => _cmd('delete_profile', {'profile_id': profileId});
 
+  LayoutList _layoutsOf(Map<String, dynamic> r) {
+    if (r['ok'] != true) return LayoutList(const [], error: _errorOf(r));
+    final l = r['layouts'], p = r['pins'], one = r['layout'];
+    return LayoutList(
+      [if (l is List) for (final x in l) if (x is Map) LayoutInfo.fromJson(x.cast<String, dynamic>())],
+      pins: {if (p is Map) for (final e in p.entries) if (e.value is String) '${e.key}': e.value as String},
+      saved: one is Map ? LayoutInfo.fromJson(one.cast<String, dynamic>()) : null,
+    );
+  }
+
+  @override
+  Future<LayoutList> listLayouts() async => _layoutsOf(await _request('list_layouts', const {}));
+
+  @override
+  Future<LayoutList> saveLayout(String name, ScreenArrangement screen) async => _layoutsOf(await _request('save_layout', {'name': name, 'screen': screen.toJson()}));
+
+  @override
+  Future<LayoutList> renameLayout(String layoutId, String name) async => _layoutsOf(await _request('rename_layout', {'layout_id': layoutId, 'name': name}));
+
+  @override
+  Future<LayoutList> deleteLayout(String layoutId) async => _layoutsOf(await _request('delete_layout', {'layout_id': layoutId}));
+
+  @override
+  Future<LayoutList> setGameLayout(String recipe, String? layoutId) async => _layoutsOf(await _request('set_game_layout', {'recipe': recipe, 'layout_id': layoutId}));
+
   @override
   Future<void> subscribeInput(bool on) async {
     _inputWanted = on;

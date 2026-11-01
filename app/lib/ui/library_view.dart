@@ -9,6 +9,7 @@ import 'catalog_logic.dart';
 import 'icons.dart';
 import 'kit.dart';
 import 'launch_card.dart';
+import 'layouts_ui.dart';
 import 'library_games.dart';
 import 'profile_files.dart';
 import 'sample_data.dart';
@@ -404,6 +405,7 @@ class _GameSheetState extends State<GameSheet> {
                                   ]),
                                 ),
                                 if (g.tier == Tier.tryIt && g.installed) _ProgramPicker(key: ValueKey('program-${g.id}'), recipe: g.id),
+                                if (g.installed) GameLayoutPin(key: ValueKey('layout-pin-${g.id}'), recipe: g.id, game: g.name),
                                 if (g.setup.isNotEmpty) ...[
                                   const SizedBox(height: 18),
                                   Text('Before your first game', key: const ValueKey('sheet-setup'), style: txt(context, size: 13, weight: FontWeight.w600)),

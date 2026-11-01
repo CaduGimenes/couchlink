@@ -101,6 +101,26 @@ pub enum Command {
     SetScreens {
         screens: Vec<crate::screens::Screen>,
     },
+    /// Saved screen layouts and the layout each game starts with (`layouts.json`).
+    ListLayouts,
+    /// Saves one screen's regions (its players are left out) under a name.
+    SaveLayout {
+        name: String,
+        screen: crate::screens::Screen,
+    },
+    RenameLayout {
+        layout_id: String,
+        name: String,
+    },
+    DeleteLayout {
+        layout_id: String,
+    },
+    /// Makes a game start with a saved layout; `layout` left out or `null` goes back to the screens as they are.
+    SetGameLayout {
+        recipe: String,
+        #[serde(default)]
+        layout_id: Option<String>,
+    },
     SubscribeInput {
         on: bool,
     },
@@ -345,6 +365,22 @@ mod tests {
 
     fn parse(v: Value) -> Request {
         Request::parse(&v.to_string()).unwrap()
+    }
+
+    #[test]
+    fn layout_commands_parse() {
+        assert_eq!(parse(json!({"id": 30, "cmd": "list_layouts"})).cmd, Command::ListLayouts);
+        match parse(json!({"id": 31, "cmd": "save_layout", "name": "Couch", "screen": {"display": "disp:1", "on": true, "seats": [0, 1], "regions": [[0, 0, 0.5, 1], [0.5, 0, 0.5, 1]], "shape": "lr"}})).cmd {
+            Command::SaveLayout { name, screen } => {
+                assert_eq!(name, "Couch");
+                assert_eq!(screen.regions.len(), 2);
+            }
+            other => panic!("save_layout parsed as {other:?}"),
+        }
+        assert_eq!(parse(json!({"id": 32, "cmd": "rename_layout", "layout_id": "l1", "name": "x"})).cmd, Command::RenameLayout { layout_id: "l1".into(), name: "x".into() });
+        assert_eq!(parse(json!({"id": 35, "cmd": "delete_layout", "layout_id": "l1"})).cmd, Command::DeleteLayout { layout_id: "l1".into() });
+        assert_eq!(parse(json!({"id": 33, "cmd": "set_game_layout", "recipe": "sworn", "layout_id": "l1"})).cmd, Command::SetGameLayout { recipe: "sworn".into(), layout_id: Some("l1".into()) });
+        assert_eq!(parse(json!({"id": 34, "cmd": "set_game_layout", "recipe": "sworn"})).cmd, Command::SetGameLayout { recipe: "sworn".into(), layout_id: None });
     }
 
     #[test]

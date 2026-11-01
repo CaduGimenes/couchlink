@@ -6,6 +6,7 @@ mod crash;
 mod displays;
 mod hotkey;
 mod hub;
+mod layouts;
 mod update;
 mod logfile;
 mod profiles;
