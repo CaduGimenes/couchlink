@@ -86,6 +86,23 @@ class _SteamAccountDialogState extends State<_SteamAccountDialog> {
     _poll = Timer.periodic(const Duration(seconds: 2), (_) => _load());
   }
 
+  /// Steam takes a few seconds to quit: the dialog checks again until it has.
+  Future<void> _closeSteam() async {
+    final err = await Scope.of(context).client.closeSteamAccount(widget.seat);
+    if (!mounted) return;
+    if (err != null) {
+      setState(() => _error = err);
+      return;
+    }
+    _poll?.cancel();
+    var tries = 0;
+    _poll = Timer.periodic(const Duration(seconds: 1), (timer) async {
+      await _load();
+      if (!(_mine?.running ?? false) || ++tries >= 20) timer.cancel();
+    });
+    await _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.c;
@@ -167,7 +184,10 @@ class _SteamAccountDialogState extends State<_SteamAccountDialog> {
             Wrap(alignment: WrapAlignment.end, spacing: 8, runSpacing: 8, children: [
               if (a != null && a.ready) ...[
                 CButton(key: const ValueKey('steam-remove'), label: t('Use my account again'), small: true, onTap: _remove),
-                CButton(key: const ValueKey('steam-open'), label: t('Open their Steam'), small: true, onTap: () => runCmd(context, () => scope.client.openSteamAccount(widget.seat))),
+                if (a.running)
+                  CButton(key: const ValueKey('steam-quit'), label: t('Close their Steam'), small: true, onTap: _closeSteam)
+                else
+                  CButton(key: const ValueKey('steam-open'), label: t('Open their Steam'), small: true, onTap: () => runCmd(context, () => scope.client.openSteamAccount(widget.seat))),
               ],
               if (a != null && !a.ready && !_working)
                 CButton(key: const ValueKey('steam-setup'), label: t('Give {name} their own account', {'name': name}), small: true, primary: true, onTap: _setUp),

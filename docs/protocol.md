@@ -49,6 +49,8 @@ Daemon to client (events, no id): `{"event": "<name>", ...}`
 | `steam_accounts` | | `{"accounts": [{"seat", "ready", "running", "plan": [{"id", "title", "detail", "needs_admin"}]}], "steam": bool}` for seats 1 and up (seat 0 always plays on the PC owner's Steam). A seat that is `ready` plays on its own Steam account in every game whose recipe uses real Steam (`shared` or `accounts`). |
 | `setup_steam_account` | `seat` | Replies at once with `{"started": "setup"}`. Windows asks for permission once (a helper Windows user for that seat, its password in Credential Manager, read access to the Steam library), then that seat's Steam opens for the player to sign in. The outcome arrives as a `log` event. |
 | `open_steam_account` | `seat` | Starts that seat's own Steam (to sign in, or to check it). |
+| `close_steam_account` | `seat` | Asks that seat's own Steam to quit, as its Exit menu does (Windows: `steam.exe -shutdown` as the seat's helper user; Linux: SIGTERM). Nothing happens when it is not running. |
+| `set_steam_close_on_end` | `on` | Close every seat's own Steam when a session ends. Saved in `settings.json`; `steam_accounts` reports it as `close_on_end`. |
 | `remove_steam_account` | `seat` | Like setup, in reverse: one Windows prompt, then the seat plays on the PC owner's account again. The helper user's profile folder is left in place. |
 
 ## Events

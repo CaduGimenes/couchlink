@@ -314,11 +314,27 @@ class FakeClient extends CouchClient {
 
   @override
   Future<({SteamAccounts? value, String? error})> steamAccounts() async => (
-        value: SteamAccounts(accounts: [
-          for (var i = 1; i < kMaxSeats; i++) SteamAccount(seat: i, ready: _ownSteam.contains(i), running: _ownSteam.contains(i), plan: _plan),
+        value: SteamAccounts(closeOnEnd: _steamCloseOnEnd, accounts: [
+          for (var i = 1; i < kMaxSeats; i++) SteamAccount(seat: i, ready: _ownSteam.contains(i), running: _steamRunning.contains(i), plan: _plan),
         ]),
         error: null,
       );
+
+  /// Seats whose own Steam runs (fake: from setup or Open until Close).
+  final Set<int> _steamRunning = {};
+  bool _steamCloseOnEnd = false;
+
+  @override
+  Future<String?> closeSteamAccount(int seat) async {
+    _steamRunning.remove(seat);
+    return null;
+  }
+
+  @override
+  Future<String?> setSteamCloseOnEnd(bool on) async {
+    _steamCloseOnEnd = on;
+    return null;
+  }
 
   bool _virtualScreens = false;
 
@@ -336,15 +352,21 @@ class FakeClient extends CouchClient {
   Future<String?> setupSteamAccount(int seat) async {
     if (seat < 1 || seat >= kMaxSeats) return 'Seat ${seat + 1} cannot have its own Steam account';
     _ownSteam.add(seat);
+    _steamRunning.add(seat);
     return null;
   }
 
   @override
-  Future<String?> openSteamAccount(int seat) async => _ownSteam.contains(seat) ? null : 'Player ${seat + 1} has no Steam account set up yet';
+  Future<String?> openSteamAccount(int seat) async {
+    if (!_ownSteam.contains(seat)) return 'Player ${seat + 1} has no Steam account set up yet';
+    _steamRunning.add(seat);
+    return null;
+  }
 
   @override
   Future<String?> removeSteamAccount(int seat) async {
     _ownSteam.remove(seat);
+    _steamRunning.remove(seat);
     return null;
   }
 

@@ -33,6 +33,15 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pump(const Duration(milliseconds: 500));
     expect(byKey('steam-ready'), findsOneWidget);
+    // Their Steam runs after setup: it can be closed from here, then opened again.
+    expect(byKey('steam-open'), findsNothing);
+    await tester.tap(byKey('steam-quit'));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(seconds: 1));
+    expect(byKey('steam-quit'), findsNothing);
+    expect(byKey('steam-open'), findsOneWidget);
+    await tester.tap(byKey('steam-open'));
+    await tester.pump(const Duration(milliseconds: 500));
     await tester.tap(byKey('steam-remove'));
     await tester.pump(const Duration(seconds: 3));
     await tester.pump(const Duration(milliseconds: 500));

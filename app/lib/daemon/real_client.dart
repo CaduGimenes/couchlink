@@ -484,6 +484,12 @@ class DaemonClient extends CouchClient {
   Future<String?> openSteamAccount(int seat) => _cmd('open_steam_account', {'seat': seat});
 
   @override
+  Future<String?> closeSteamAccount(int seat) => _cmd('close_steam_account', {'seat': seat});
+
+  @override
+  Future<String?> setSteamCloseOnEnd(bool on) => _cmd('set_steam_close_on_end', {'on': on});
+
+  @override
   Future<String?> removeSteamAccount(int seat) => _cmd('remove_steam_account', {'seat': seat});
 
   // ---- controller profiles

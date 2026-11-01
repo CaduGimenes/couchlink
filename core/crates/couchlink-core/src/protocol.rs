@@ -163,6 +163,14 @@ pub enum Command {
     OpenSteamAccount {
         seat: usize,
     },
+    /// Closes that seat's own Steam, as its Exit menu does.
+    CloseSteamAccount {
+        seat: usize,
+    },
+    /// Close every seat's own Steam when a session ends (`steam_accounts` reports it as `close_on_end`).
+    SetSteamCloseOnEnd {
+        on: bool,
+    },
     RemoveSteamAccount {
         seat: usize,
     },

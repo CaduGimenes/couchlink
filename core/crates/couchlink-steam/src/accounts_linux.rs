@@ -60,6 +60,16 @@ pub fn steam_running(cfg: &AccountsConfig) -> bool {
     steam_pid(cfg).is_some()
 }
 
+/// Asks the seat's Steam to quit: SIGTERM, which Steam answers as its Exit menu does.
+pub fn stop_steam(cfg: &AccountsConfig) -> Result<()> {
+    let Some(pid) = steam_pid(cfg) else { return Ok(()) };
+    // SAFETY: kill is a plain system call; pid is the seat's Steam, checked by its name just above.
+    if unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) } != 0 {
+        return Err(SteamError::io(format!("stop the seat's Steam ({pid})"), std::io::Error::last_os_error()));
+    }
+    Ok(())
+}
+
 /// Where Valve's steam package keeps the bootstrap it unpacks into a new install.
 const BOOTSTRAPS: [&str; 4] = [
     "/usr/lib/steam/bootstraplinux_ubuntu12_32.tar.xz",

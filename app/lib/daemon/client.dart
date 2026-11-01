@@ -175,6 +175,12 @@ abstract class CouchClient extends ChangeNotifier {
   /// `open_steam_account`: starts that seat's own Steam.
   Future<String?> openSteamAccount(int seat);
 
+  /// `close_steam_account`: closes that seat's own Steam, as its Exit menu does.
+  Future<String?> closeSteamAccount(int seat);
+
+  /// `set_steam_close_on_end`: close every seat's own Steam when a session ends.
+  Future<String?> setSteamCloseOnEnd(bool on);
+
   /// `remove_steam_account`: the seat goes back to the PC owner's account (one Windows prompt).
   Future<String?> removeSteamAccount(int seat);
 

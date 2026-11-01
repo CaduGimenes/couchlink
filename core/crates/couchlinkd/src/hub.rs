@@ -49,6 +49,11 @@ fn save_setting(key: &str, value: serde_json::Value) {
     }
 }
 
+/// Settings, "Close players' own Steam when a session ends". Off unless turned on.
+fn steam_close_on_end() -> bool {
+    load_settings()["steam_close_on_end"].as_bool().unwrap_or(false)
+}
+
 fn screens_file() -> std::path::PathBuf {
     couchlink_core::paths::state_dir().join("screens.json")
 }
@@ -720,7 +725,16 @@ impl Hub {
             Command::SetGameProgram { recipe, exe } => self.session.set_game_program(&recipe, exe.as_deref()).map(|_| none),
             Command::StartSession { recipe, options, plain } => self.start_session(&recipe, &options, plain),
             Command::StopSession => self.stop_session(),
-            Command::SteamAccounts => Ok(crate::accounts::list()),
+            Command::SteamAccounts => {
+                let mut list = crate::accounts::list();
+                list["close_on_end"] = json!(steam_close_on_end());
+                Ok(list)
+            }
+            Command::CloseSteamAccount { seat } => crate::accounts::close(seat).map(|_| none),
+            Command::SetSteamCloseOnEnd { on } => {
+                save_setting("steam_close_on_end", json!(on));
+                Ok(none)
+            }
             Command::VirtualScreens => Ok(crate::vscreen_setup::status()),
             Command::SetupVirtualScreens => {
                 // The Windows prompt waits for the person at the PC: off the hub task, reported with VirtualScreensDone.
@@ -825,6 +839,10 @@ impl Hub {
     }
 
     fn session_changed(&mut self, info: SessionInfo) {
+        if self.session_info.active() && !info.active() && steam_close_on_end() {
+            // Steam takes a few seconds to quit: off the hub task.
+            std::thread::spawn(crate::accounts::close_all);
+        }
         if !info.active() {
             self.session_handle = None;
             if self.recipe_controls.take().is_some() {

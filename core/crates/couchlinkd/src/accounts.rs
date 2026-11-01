@@ -69,6 +69,25 @@ pub fn open(seat: usize) -> Result<(), String> {
     couchlink_steam::accounts_start_steam_logged(&cfg, true, Some(&log)).map(|_| ()).map_err(|e| e.user_message())
 }
 
+/// Closes the seat's own Steam, as its Exit menu does.
+pub fn close(seat: usize) -> Result<(), String> {
+    let cfg = config(seat)?;
+    crate::logfile::write("info", &format!("closing player {}'s own Steam", seat + 1));
+    couchlink_steam::accounts_stop_steam(&cfg).map_err(|e| e.user_message())
+}
+
+/// Closes every seat's own Steam that runs (Settings, "Close players' own Steam when a session ends").
+pub fn close_all() {
+    for seat in 1..couchlink_core::MAX_SEATS {
+        let Ok(cfg) = config(seat) else { continue };
+        if couchlink_steam::accounts_ready(&cfg) && couchlink_steam::accounts_steam_running(&cfg) {
+            if let Err(e) = close(seat) {
+                crate::logfile::write("warn", &format!("could not close player {}'s own Steam: {e}", seat + 1));
+            }
+        }
+    }
+}
+
 /// Where a seat's own Steam writes its output (Linux): `<state>/logs/steam-seat-<n>.log`.
 pub fn seat_steam_log(seat: usize) -> std::path::PathBuf {
     crate::logfile::dir().join(format!("steam-seat-{}.log", seat + 1))

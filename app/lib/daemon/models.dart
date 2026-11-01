@@ -696,11 +696,14 @@ class SteamAccount {
 
 /// The `steam_accounts` answer.
 class SteamAccounts {
-  const SteamAccounts({this.accounts = const [], this.steam = true});
+  const SteamAccounts({this.accounts = const [], this.steam = true, this.closeOnEnd = false});
   final List<SteamAccount> accounts;
 
   /// False when Steam is not installed on this PC.
   final bool steam;
+
+  /// Every seat's own Steam is closed when a session ends (Settings).
+  final bool closeOnEnd;
 
   factory SteamAccounts.fromJson(Map<String, dynamic> j) => SteamAccounts(
         accounts: [
@@ -709,6 +712,7 @@ class SteamAccounts {
               if (x is Map) SteamAccount.fromJson(x.cast<String, dynamic>()),
         ],
         steam: j['steam'] != false,
+        closeOnEnd: j['close_on_end'] == true,
       );
 }
 

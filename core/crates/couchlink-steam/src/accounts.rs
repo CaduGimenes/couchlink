@@ -217,6 +217,15 @@ pub fn accounts_steam_running(cfg: &AccountsConfig) -> bool {
     check_name(cfg).is_ok() && imp::steam_running(cfg)
 }
 
+/// Ask the seat's own Steam to quit, as its Exit menu does. Nothing happens when it is not running.
+pub fn accounts_stop_steam(cfg: &AccountsConfig) -> Result<()> {
+    check_name(cfg)?;
+    if !imp::steam_running(cfg) {
+        return Ok(());
+    }
+    imp::stop_steam(cfg)
+}
+
 /// A process started as a seat's helper user. `process` is an owned Windows process handle (full access), the only
 /// way this Windows user can wait for or end a process of another user.
 #[derive(Debug)]
@@ -347,6 +356,9 @@ mod imp {
     }
     pub fn steam_running(_: &AccountsConfig) -> bool {
         false
+    }
+    pub fn stop_steam(_: &AccountsConfig) -> Result<()> {
+        Err(no())
     }
     pub fn launch(_: &AccountsConfig, _: &std::path::Path, _: &str, _: &std::path::Path, _: &[(String, String)]) -> Result<LaunchedAs> {
         Err(no())
@@ -513,20 +525,53 @@ mod imp {
     }
 
     pub fn start_steam(cfg: &AccountsConfig) -> Result<u32> {
+        run_steam(cfg, &cfg.steam_command_line())
+    }
+
+    /// Ends the seat's Steam and its helpers, by process id: only processes of the helper user are named, so the
+    /// owner's Steam is never touched. Only the helper user may end its own processes, so `taskkill` runs as that user.
+    /// (`steam.exe -shutdown` does not reach a Steam started with `-master_ipc_name_override`: it starts one more.
+    /// taskkill's own `USERNAME` filter takes a minute and more, and by image name alone it ends the owner's Steam too.)
+    pub fn stop_steam(cfg: &AccountsConfig) -> Result<()> {
+        let pids: Vec<u32> = helper_steam(cfg).into_iter().map(|(_, pid)| pid).collect();
+        if pids.is_empty() {
+            return Ok(());
+        }
+        let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        let taskkill = std::path::Path::new(&root).join("System32").join("taskkill.exe");
+        let mut line = format!("\"{}\" /F", taskkill.display());
+        for pid in pids {
+            line += &format!(" /PID {pid}");
+        }
+        run_as(cfg, &taskkill, &line, true).map(|_| ())
+    }
+
+    /// Runs Steam with the command line `line` as the helper user.
+    fn run_steam(cfg: &AccountsConfig, line: &str) -> Result<u32> {
+        run_as(cfg, &cfg.steam_exe, line, false)
+    }
+
+    /// Runs `app` with the command line `line` as the helper user, in `app`'s folder; `hidden` keeps its window out of
+    /// sight.
+    fn run_as(cfg: &AccountsConfig, app: &std::path::Path, line: &str, hidden: bool) -> Result<u32> {
         let user = cfg.user_name();
         let password = read_password(&cfg.credential_target())?
             .ok_or_else(|| SteamError::System("the helper user has not been set up yet".into()))?;
         let user_w = w(&user);
         let domain_w = w(".");
         let pass_w = w(&password);
-        let app_w = w(&cfg.steam_exe.display().to_string());
-        let mut cmd_w = w(&cfg.steam_command_line());
-        let cwd_w = cfg.steam_exe.parent().map(|p| w(&p.display().to_string()));
+        let app_w = w(&app.display().to_string());
+        let mut cmd_w = w(line);
+        let cwd_w = app.parent().map(|p| w(&p.display().to_string()));
         // SAFETY: all pointers are valid NUL terminated wide strings living through the call;
         // STARTUPINFOW/PROCESS_INFORMATION are plain C structs where zero is a valid initial state.
         unsafe {
             let mut si: STARTUPINFOW = std::mem::zeroed();
             si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+            if hidden {
+                si.dwFlags = windows_sys::Win32::System::Threading::STARTF_USESHOWWINDOW;
+                si.wShowWindow = 0; // SW_HIDE
+            }
             let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
             let ok = CreateProcessWithLogonW(
                 user_w.as_ptr(),
@@ -558,11 +603,49 @@ mod imp {
     }
 
     pub fn steam_running(cfg: &AccountsConfig) -> bool {
-        let filter_user = format!("USERNAME eq {}", cfg.user_name());
-        match run_hidden("tasklist", &["/FI".into(), filter_user, "/FI".into(), "IMAGENAME eq steam.exe".into(), "/NH".into()]) {
-            Ok(out) => String::from_utf8_lossy(&out.stdout).to_lowercase().contains("steam.exe"),
-            Err(_) => false,
+        helper_steam(cfg).iter().any(|(name, _)| name == "steam.exe")
+    }
+
+    /// The Steam processes (`steam.exe`, `steamwebhelper.exe`, ...) running as the seat's helper user, as (lower case
+    /// image name, process id). From Windows' process list with each process's user, which any user may read; tasklist's
+    /// `USERNAME` filter gets the same but can take a minute.
+    fn helper_steam(cfg: &AccountsConfig) -> Vec<(String, u32)> {
+        use windows_sys::Win32::Security::{EqualSid, LookupAccountNameW, SID_NAME_USE};
+        use windows_sys::Win32::System::RemoteDesktop::{WTSEnumerateProcessesW, WTSFreeMemory, WTS_PROCESS_INFOW};
+        let user_w = w(&cfg.user_name());
+        let mut sid = vec![0u8; 256];
+        let mut sid_len = sid.len() as u32;
+        let mut domain = vec![0u16; 256];
+        let mut domain_len = domain.len() as u32;
+        let mut kind: SID_NAME_USE = 0;
+        let mut out = Vec::new();
+        // SAFETY: the buffers are as large as the lengths passed; the process list is read only up to `count` and freed
+        // with WTSFreeMemory.
+        unsafe {
+            if LookupAccountNameW(null(), user_w.as_ptr(), sid.as_mut_ptr().cast(), &mut sid_len, domain.as_mut_ptr(), &mut domain_len, &mut kind) == FALSE {
+                return out;
+            }
+            let mut list: *mut WTS_PROCESS_INFOW = null_mut();
+            let mut count = 0u32;
+            if WTSEnumerateProcessesW(null_mut(), 0, 1, &mut list, &mut count) == FALSE || list.is_null() {
+                return out;
+            }
+            for p in std::slice::from_raw_parts(list, count as usize) {
+                if p.pUserSid.is_null() || p.pProcessName.is_null() || EqualSid(p.pUserSid, sid.as_mut_ptr().cast()) == FALSE {
+                    continue;
+                }
+                let mut len = 0;
+                while *p.pProcessName.add(len) != 0 {
+                    len += 1;
+                }
+                let name = String::from_utf16_lossy(std::slice::from_raw_parts(p.pProcessName, len)).to_lowercase();
+                if name.starts_with("steam") {
+                    out.push((name, p.ProcessId));
+                }
+            }
+            WTSFreeMemory(list.cast());
         }
+        out
     }
 
     /// The helper user's own environment block (from its profile), as `NAME=value` entries.
@@ -681,6 +764,38 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// On a PC where seat 2 has its own Steam set up: starts that Steam, then closes it the way the app does.
+    #[test]
+    #[ignore = "starts and closes the real Steam of seat 2"]
+    fn a_seats_own_steam_closes_when_asked() {
+        let cfg = crate::seat_config(1).filter(accounts_ready).expect("seat 2 has its own Steam set up");
+        let wait = |want: bool| {
+            let start = std::time::Instant::now();
+            while accounts_steam_running(&cfg) != want && start.elapsed() < std::time::Duration::from_secs(90) {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            accounts_steam_running(&cfg) == want
+        };
+        if !accounts_steam_running(&cfg) {
+            accounts_start_steam(&cfg, true).unwrap();
+            assert!(wait(true), "seat 2's Steam started");
+            std::thread::sleep(std::time::Duration::from_secs(20));
+        }
+        // The owner's Steam, when it runs, must still run afterwards.
+        let owner = || {
+            let out = std::process::Command::new("tasklist").args(["/FI", &format!("USERNAME eq {}", std::env::var("USERNAME").unwrap()), "/FI", "IMAGENAME eq steam.exe", "/NH"]).output().unwrap();
+            String::from_utf8_lossy(&out.stdout).to_lowercase().contains("steam.exe")
+        };
+        let owner_before = owner();
+        let t = std::time::Instant::now();
+        accounts_stop_steam(&cfg).unwrap();
+        assert!(wait(false), "seat 2's Steam quit");
+        eprintln!("seat 2's Steam quit in {:?}", t.elapsed());
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        assert_eq!(owner(), owner_before, "the owner's Steam is left alone");
+        accounts_stop_steam(&cfg).unwrap();
+    }
 
     fn cfg() -> AccountsConfig {
         AccountsConfig {

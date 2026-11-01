@@ -794,6 +794,48 @@ class _UpdatesSectionState extends State<_UpdatesSection> {
   }
 }
 
+/// Settings: whether the Steam of players with their own account closes when a session ends.
+class _SteamCloseSection extends StatefulWidget {
+  const _SteamCloseSection();
+
+  @override
+  State<_SteamCloseSection> createState() => _SteamCloseSectionState();
+}
+
+class _SteamCloseSectionState extends State<_SteamCloseSection> {
+  bool? _on;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final r = await Scope.of(context).client.steamAccounts();
+      if (mounted) setState(() => _on = r.value?.closeOnEnd ?? false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Expanded(child: Text(t('Close their Steam when a session ends'), style: txt(context, size: 12, color: c.ink2))),
+        Switch(
+          key: const ValueKey('steam-close-on-end'),
+          value: _on ?? false,
+          onChanged: _on == null
+              ? null
+              : (on) {
+                  setState(() => _on = on);
+                  runCmd(context, () => Scope.of(context).client.setSteamCloseOnEnd(on));
+                },
+        ),
+      ]),
+      Text(t('For players who play on their own Steam account. Your own Steam stays open.'), style: txt(context, size: 11, color: c.ink3, height: 1.35)),
+    ]);
+  }
+}
+
 /// Settings, in the sidebar in place of the pages: General (appearance, language, updates, logs) and Bindings.
 class _SettingsPanel extends StatelessWidget {
   const _SettingsPanel();
@@ -839,6 +881,9 @@ class _SettingsPanel extends StatelessWidget {
       action('settings-copy-log', iconCopy, 'Copy log', () => copyLog(scope)),
       action('settings-save-report', iconFileText, 'Save full report', () => saveReport(scope), primary: true),
       action('settings-open-logs', iconFolderOpen, 'Open log folder', () => openLogFolder(scope)),
+      const SizedBox(height: 18),
+      heading('Players’ own Steam'),
+      const _SteamCloseSection(),
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
