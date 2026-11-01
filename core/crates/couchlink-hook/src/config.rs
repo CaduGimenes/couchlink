@@ -178,6 +178,7 @@ mod tests {
             fake_cursor: true,
             hook_children: true,
             own_pads: Some(vec![r"\?\HID#VID_054C&PID_0CE6#1#{4d1e55b2}".into()]),
+            preload: vec![PathBuf::from("C:/Steam/GameOverlayRenderer64.dll")],
         };
         let m = config_message(&cfg, &HookOptions::default());
         assert_eq!(m["cmd"], "config");
@@ -191,7 +192,9 @@ mod tests {
         assert_eq!(m["config"]["fake_cursor"], true);
         assert_eq!(m["config"]["hook_children"], true);
         assert_eq!(m["config"]["own_pads"][0], r"\?\HID#VID_054C&PID_0CE6#1#{4d1e55b2}");
-        assert!(config_message(&HookConfig::default(), &HookOptions::default())["config"].get("own_pads").is_none());
+        assert_eq!(m["config"]["preload"][0], "C:/Steam/GameOverlayRenderer64.dll");
+        let plain = config_message(&HookConfig::default(), &HookOptions::default());
+        assert!(plain["config"].get("own_pads").is_none() && plain["config"].get("preload").is_none());
     }
 
     #[test]
