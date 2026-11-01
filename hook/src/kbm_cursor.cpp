@@ -3,8 +3,10 @@
 // The desktop has one real cursor, which belongs to whoever sits at the keyboard and mouse of the PC. A copy with its
 // own mouse gets a fake cursor instead (kbm_hook.cpp keeps the position). While the game wants a visible cursor
 // (menus), this overlay draws an arrow at that position; while the game hides the cursor (mouse look) the overlay is
-// hidden. The idea is ProtoInput's FakeCursor (MIT, see THIRD_PARTY.md); the window is a layered, topmost,
-// transparent-to-input popup owned by its own thread.
+// hidden. The idea is ProtoInput's FakeCursor (MIT, see THIRD_PARTY.md); the window is a layered,
+// transparent-to-input popup that runs on its own thread and is owned by the game's window. It is not topmost: an
+// owned window stays right above its owner and below whatever is in front of the owner, so the arrow never hovers
+// over another application (alt-tab to Discord) and goes away when the game window is minimised.
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -83,7 +85,7 @@ bool CreateOverlay(Overlay& o) {
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.lpszClassName = kClass;
     RegisterClassW(&wc);
-    o.wnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, kClass,
+    o.wnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, kClass,
                             L"couchlink fake cursor", WS_POPUP, 0, 0, kSize, kSize, nullptr, nullptr, wc.hInstance, nullptr);
     if (!o.wnd) return false;
     BITMAPINFO bi = {};
@@ -104,6 +106,14 @@ bool CreateOverlay(Overlay& o) {
     return true;
 }
 
+// Makes `game` the overlay's owner and puts the overlay directly above it in the z-order (a window in front of the
+// game stays in front of the arrow).
+void FollowOwner(HWND overlay, HWND game) {
+    SetWindowLongPtrW(overlay, GWLP_HWNDPARENT, reinterpret_cast<LONG_PTR>(game));
+    HWND above = GetWindow(game, GW_HWNDPREV);
+    SetWindowPos(overlay, above ? above : HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
 DWORD WINAPI OverlayThread(LPVOID) {
     Overlay o;
     if (!CreateOverlay(o)) {
@@ -111,13 +121,18 @@ DWORD WINAPI OverlayThread(LPVOID) {
         return 1;
     }
     bool shown = false;
+    HWND owner = nullptr;
     POINT last = {-32768, -32768};
     for (;;) {
         MSG msg;
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&msg);
         KbmCursorView v = KbmCursor();
-        bool want = v.visible && v.window && IsWindowVisible(v.window);
+        bool want = v.visible && v.window && IsWindowVisible(v.window) && !IsIconic(v.window);
         if (want) {
+            if (v.window != owner) {
+                owner = v.window;
+                FollowOwner(o.wnd, owner);
+            }
             if (!shown || v.screen.x != last.x || v.screen.y != last.y) {
                 POINT pos = v.screen;
                 POINT src = {0, 0};
@@ -128,6 +143,7 @@ DWORD WINAPI OverlayThread(LPVOID) {
             }
             if (!shown) {
                 ShowWindow(o.wnd, SW_SHOWNOACTIVATE);
+                FollowOwner(o.wnd, owner);
                 shown = true;
             }
         } else if (shown) {

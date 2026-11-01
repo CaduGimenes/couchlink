@@ -265,6 +265,8 @@ mod tests {
             hide_keys: String::new(),
             host_control: false,
             control_keys: String::new(),
+            show_cursors: true,
+            only_in_front: true,
             dev: false,
         }
     }

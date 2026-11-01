@@ -168,7 +168,7 @@ impl Launcher for HookLauncher {
             let tag = format!("{}-{}", std::process::id(), LAUNCHES.fetch_add(1, Ordering::Relaxed));
             super::rawkbm::attach(&super::rawkbm::feed_name(tag, seat as u32), &spec.devices).ok()
         });
-        let fake_cursor = own_kbm.is_some();
+        let fake_cursor = own_kbm.is_some() && super::rawkbm::show_cursors();
         let mut kbm = own_kbm.or_else(|| {
             let seat = spec.seat.filter(|s| super::padfeed::seat_sends_kbm(*s) || spec.block_desktop_kbm)?;
             let tag = format!("{}-{}", std::process::id(), LAUNCHES.fetch_add(1, Ordering::Relaxed));
@@ -312,7 +312,7 @@ fn launch_as_seat_user(spec: &LaunchSpec, account: &couchlink_steam::AccountsCon
         cow_root: Some(spec.game_dir.clone()),
         saves: Vec::new(),
         kbm_feed: kbm.as_ref().map(|g| g.name().to_string()),
-        fake_cursor: kbm.is_some(),
+        fake_cursor: kbm.is_some() && super::rawkbm::show_cursors(),
         hook_children: spec.hook_children,
         own_pads: Some(own_pad_paths(&spec.devices)),
     };

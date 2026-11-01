@@ -182,6 +182,8 @@ impl Run {
         s.step = step;
         s.pid = pid.or(s.pid);
         s.error = error;
+        // The input feeds know which windows are the games' (only while a game is in front).
+        super::rawkbm::set_copy_pids(self.seats.iter().filter_map(|s| s.window_pid.or_else(|| s.child.as_ref().map(|c| c.pid()))).collect());
         self.publish();
     }
 
@@ -902,6 +904,7 @@ impl Run {
     fn close_everything(&mut self) {
         self.presenters.clear();
         super::rawkbm::set_redirects(Vec::new());
+        super::rawkbm::set_copy_pids(Vec::new());
         self.placer.restore_all();
         for s in self.seats.iter().filter(|s| !s.exited) {
             if let Some(c) = &s.child {

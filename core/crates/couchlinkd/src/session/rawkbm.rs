@@ -26,6 +26,10 @@
 //! from the window under the real pointer (its process) and kept while a key or button is down; mouse movement is
 //! sent so the copy's own cursor lands where the real pointer is.
 //!
+//! Only while a game is in front (Settings): with another application's window in front (alt-tab to Discord), the
+//! feeds pass nothing to the copies, so typing and clicking there changes nothing in a game. [`front_allows`] is the
+//! rule; the keys and buttons a copy already holds are still let go.
+//!
 //! Limits: devices that Windows merges (for example a laptop's touchpad and keyboard) are as many raw devices as the
 //! driver reports; a gaming mouse often shows up as a keyboard as well, which is harmless. Absolute pointing
 //! devices (remote desktop, tablets) are turned into relative movement. Raw Input does not stop the real keyboard
@@ -213,6 +217,28 @@ pub fn feed_name(session: impl Display, seat: u32) -> String {
 
 // ---------------------------------------------------------------------------------------------- routing
 
+/// What is in front of everything else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Foreground {
+    /// No window has the focus.
+    Nothing,
+    /// The desktop or another shell surface (Couchlink gives it the focus during a session so no copy is favoured).
+    Desktop,
+    /// A window of this process.
+    Window(u32),
+}
+
+/// Whether the keyboards and mice may control the games: always when `only_front` is off, otherwise while nothing,
+/// the desktop or a window of a game copy (`is_copy` says by process id) is in front. Any other window, Couchlink's
+/// own included, is the player using that application.
+pub fn front_allows(only_front: bool, front: Foreground, is_copy: impl Fn(u32) -> bool) -> bool {
+    !only_front
+        || match front {
+            Foreground::Nothing | Foreground::Desktop => true,
+            Foreground::Window(pid) => is_copy(pid),
+        }
+}
+
 /// One input as Raw Input reports it, before it is routed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Input {
@@ -282,6 +308,10 @@ struct Registry {
     host: HostRoute,
     /// Finds the window under the pointer (the platform's when None; tests put their own).
     pointer: Option<fn() -> Option<Pointer>>,
+    /// Only while a game is in front (Settings): see [`front_allows`].
+    only_front: bool,
+    /// Finds what is in front (the platform's when None; tests put their own).
+    foreground: Option<fn() -> Foreground>,
 }
 
 static REGISTRY: LazyLock<Mutex<Registry>> = LazyLock::new(|| Mutex::new(Registry::default()));
@@ -302,8 +332,40 @@ impl Registry {
         self.devices.iter().find(|d| d.handle == handle).map(|d| d.id.clone())
     }
 
+    /// True while another application is in front and the feeds are held back.
+    fn blocked(&self) -> bool {
+        self.only_front && {
+            let front = self.foreground.unwrap_or(platform_foreground)();
+            !front_allows(true, front, |pid| self.seats.iter().any(|s| s.runs(pid)) || copy_pids().contains(&pid))
+        }
+    }
+
+    /// With another application in front: nothing reaches a copy, except that keys and buttons it already holds are
+    /// let go (they would stay down otherwise). Press to join still works, it is for Couchlink's own window.
+    fn route_blocked(&mut self, device: &str, input: Input) -> Option<RawKbmEvent> {
+        self.release_host(device, input);
+        let Some(seat) = self.seats.iter_mut().find(|s| s.devices.iter().any(|d| d == device)) else {
+            return self.join(device, input);
+        };
+        let idx = seat.devices.iter().position(|d| d == device).unwrap_or(0) as u8;
+        match input {
+            Input::Key { vk, scan, flags } if flags & key_flags::BREAK != 0 => seat.feed.push_key(idx, vk, scan, flags),
+            Input::Mouse { flags, .. } => {
+                let up = BUTTON_DOWNS.iter().filter(|d| flags & (*d << 1) != 0).fold(0, |up, d| up | d << 1);
+                if up != 0 {
+                    seat.feed.push_mouse(idx, 0, 0, up, 0);
+                }
+            }
+            _ => {}
+        }
+        None
+    }
+
     /// Writes the input to the seat feed that owns the device, or reports press to join.
     fn route(&mut self, device: &str, input: Input) -> Option<RawKbmEvent> {
+        if self.blocked() {
+            return self.route_blocked(device, input);
+        }
         if self.route_host(device, input) {
             return None;
         }
@@ -320,6 +382,11 @@ impl Registry {
                 return None;
             }
         }
+        self.join(device, input)
+    }
+
+    /// Input from a device no seat owns: only Enter asks for a seat.
+    fn join(&mut self, device: &str, input: Input) -> Option<RawKbmEvent> {
         match input {
             // Only Enter joins: any other key or a click is someone using the PC, not asking for a seat.
             Input::Key { vk, .. } if vk != VK_RETURN => None,
@@ -583,6 +650,41 @@ pub fn host_control() -> bool {
     registry().host_spare
 }
 
+static SHOW_CURSORS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Couchlink's own cursor for a player with a keyboard and mouse on or off (Settings); read when a copy starts.
+pub fn set_show_cursors(on: bool) {
+    SHOW_CURSORS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether a copy started now gets Couchlink's cursor.
+pub fn show_cursors() -> bool {
+    SHOW_CURSORS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Only while a game is in front on or off (Settings): see [`front_allows`].
+pub fn set_only_in_front(on: bool) {
+    registry().only_front = on;
+}
+
+/// Whether the feeds are held back while another application is in front.
+pub fn only_in_front() -> bool {
+    registry().only_front
+}
+
+/// The processes of the running session's copies, whatever the feeds know of them (a launcher's game window is in
+/// another process than the one started).
+static COPY_PIDS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+fn copy_pids() -> Vec<u32> {
+    COPY_PIDS.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// Sets the processes of the session's copies (empty: none).
+pub fn set_copy_pids(pids: Vec<u32>) {
+    *COPY_PIDS.lock().unwrap_or_else(|e| e.into_inner()) = pids;
+}
+
 /// The control keys: every keyboard and mouse controls the copy under the pointer, or goes back to its player.
 /// The new state, or None when no copy has a feed (nothing to control).
 pub fn toggle_takeover() -> Option<bool> {
@@ -607,6 +709,11 @@ pub fn add_pid(name: &str, pid: u32) {
             seat.pids.push(pid);
         }
     }
+}
+
+/// The window classes of the desktop and the taskbar (one explorer process shows them all).
+fn is_shell_class(class: &str) -> bool {
+    ["Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"].contains(&class)
 }
 
 /// Parts of the desktop that show another part (virtual screens: the player's part shows their virtual monitor).
@@ -636,6 +743,17 @@ fn platform_pointer() -> Option<Pointer> {
     #[cfg(not(windows))]
     {
         None
+    }
+}
+
+fn platform_foreground() -> Foreground {
+    #[cfg(windows)]
+    {
+        win::foreground()
+    }
+    #[cfg(not(windows))]
+    {
+        Foreground::Nothing
     }
 }
 
@@ -819,6 +937,44 @@ mod win {
             GetClientRect(root, &mut r);
             Some(Pointer { pid, x: client.x, y: client.y, w: r.right - r.left, h: r.bottom - r.top })
         }
+    }
+
+    /// The window in front, looked at once per `FRONT_TTL` however many inputs arrive.
+    pub fn foreground() -> Foreground {
+        use std::time::Instant;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetForegroundWindow, GetShellWindow, GetWindowThreadProcessId};
+        const FRONT_TTL: Duration = Duration::from_millis(50);
+        static CACHE: Mutex<Option<(Instant, Foreground)>> = Mutex::new(None);
+        let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((at, front)) = *cache {
+            if at.elapsed() < FRONT_TTL {
+                return front;
+            }
+        }
+        // SAFETY: plain queries on the window handle the system just returned; a stale handle only makes them fail.
+        let front = unsafe {
+            let w = GetForegroundWindow();
+            if w.is_null() {
+                Foreground::Nothing
+            } else if w == GetShellWindow() {
+                Foreground::Desktop
+            } else {
+                let mut class = [0u16; 64];
+                let n = GetClassNameW(w, class.as_mut_ptr(), class.len() as i32).max(0) as usize;
+                let class = String::from_utf16_lossy(&class[..n]);
+                let mut pid = 0u32;
+                GetWindowThreadProcessId(w, &mut pid);
+                if is_shell_class(&class) {
+                    Foreground::Desktop
+                } else if pid == 0 {
+                    Foreground::Nothing
+                } else {
+                    Foreground::Window(pid)
+                }
+            }
+        };
+        *cache = Some((Instant::now(), front));
+        front
     }
 
     pub fn start() -> Result<(), String> {
@@ -1159,6 +1315,9 @@ pub fn test_reset() {
     reg.host_takeover = false;
     reg.host = HostRoute::default();
     reg.pointer = None;
+    reg.only_front = false;
+    reg.foreground = None;
+    set_copy_pids(Vec::new());
 }
 
 /// Host control in tests: whether it is on, a takeover, and the window under the pointer.
@@ -1168,6 +1327,14 @@ pub fn test_host(spare: bool, takeover: bool, pointer: fn() -> Option<Pointer>) 
     reg.host_spare = spare;
     reg.host_takeover = takeover;
     reg.pointer = Some(pointer);
+}
+
+/// Only-while-a-game-is-in-front in tests: whether it is on, and what is in front.
+#[cfg(test)]
+pub fn test_front(only_front: bool, foreground: fn() -> Foreground) {
+    let mut reg = registry();
+    reg.only_front = only_front;
+    reg.foreground = Some(foreground);
 }
 
 /// Attaches a seat feed without starting the Raw Input listener.
@@ -1364,6 +1531,115 @@ mod tests {
         drop(guard);
         assert!(!active());
         test_reset();
+    }
+
+    #[test]
+    fn the_front_rule_lets_games_the_desktop_and_nothing_through() {
+        let copy = |pid: u32| pid == 100;
+        assert!(front_allows(false, Foreground::Window(5), copy), "off: always");
+        assert!(front_allows(true, Foreground::Window(100), copy), "a game copy");
+        assert!(front_allows(true, Foreground::Desktop, copy));
+        assert!(front_allows(true, Foreground::Nothing, copy));
+        assert!(!front_allows(true, Foreground::Window(5), copy), "another application, Couchlink's own included");
+        assert!(!front_allows(true, Foreground::Window(0), copy));
+    }
+
+    #[test]
+    fn the_desktop_and_taskbar_are_shell_windows() {
+        assert!(is_shell_class("Progman") && is_shell_class("WorkerW") && is_shell_class("Shell_TrayWnd"));
+        assert!(!is_shell_class("Chrome_WidgetWin_1") && !is_shell_class(""));
+    }
+
+    static FRONT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+    /// 0: nothing, 1: the desktop, else a window of that process.
+    fn test_foreground() -> Foreground {
+        match FRONT.load(std::sync::atomic::Ordering::Relaxed) {
+            0 => Foreground::Nothing,
+            1 => Foreground::Desktop,
+            pid => Foreground::Window(pid),
+        }
+    }
+
+    // Needs the feed, which is Windows only (as above).
+    #[cfg(windows)]
+    #[test]
+    fn another_application_in_front_holds_the_feeds_back() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let _l = test_lock();
+        test_reset();
+        let k = test_add_device(Kind::Keyboard, KBD1, 51);
+        let m = test_add_device(Kind::Mouse, MOUSE1, 52);
+        let spare = test_add_device(Kind::Keyboard, KBD2, 53);
+        let g = test_attach("Local\\couchlink-kbm-unit-front-a", &[k.id.clone(), m.id.clone()]).expect("attach");
+        add_pid(g.name(), 100);
+        let head = || registry().seats.iter().find(|s| s.name == g.name()).unwrap().feed.head();
+        test_front(true, test_foreground);
+        let press = Input::Key { vk: 0x41, scan: 0x1E, flags: 0 };
+        let release = Input::Key { vk: 0x41, scan: 0x1E, flags: key_flags::BREAK };
+
+        // The game, the desktop and no window: input flows.
+        for front in [100, 1, 0] {
+            FRONT.store(front, Relaxed);
+            let before = head();
+            test_input(&k.id, press);
+            test_input(&k.id, release);
+            assert_eq!(head(), before + 2, "front {front}");
+        }
+        // Another application: nothing, not even mouse movement or a click.
+        FRONT.store(7, Relaxed);
+        let before = head();
+        test_input(&k.id, press);
+        test_input(&m.id, Input::Mouse { dx: 4, dy: 4, flags: 0, wheel: 0 });
+        test_input(&m.id, Input::Mouse { dx: 0, dy: 0, flags: mouse_flags::LEFT_DOWN, wheel: 120 });
+        assert_eq!(head(), before);
+        // What the game holds is let go, so no key or button stays down.
+        FRONT.store(100, Relaxed);
+        test_input(&k.id, press);
+        test_input(&m.id, Input::Mouse { dx: 0, dy: 0, flags: mouse_flags::LEFT_DOWN, wheel: 0 });
+        FRONT.store(7, Relaxed);
+        let before = head();
+        test_input(&k.id, release);
+        test_input(&m.id, Input::Mouse { dx: 0, dy: 0, flags: mouse_flags::LEFT_UP, wheel: 0 });
+        assert_eq!(head(), before + 2);
+        // Host control sends nothing either, and a session copy's process counts through the session's list.
+        test_host(true, false, test_pointer);
+        POINTER_PID.store(100, Relaxed);
+        test_input(&spare.id, press);
+        assert_eq!(head(), before + 2);
+        set_copy_pids(vec![7]);
+        test_front(true, test_foreground);
+        test_input(&k.id, press);
+        assert_eq!(head(), before + 3, "a window of a process the session lists is a game");
+        // Off: whatever is in front.
+        set_copy_pids(Vec::new());
+        test_front(false, test_foreground);
+        test_input(&k.id, press);
+        assert_eq!(head(), before + 4);
+        drop(g);
+        test_reset();
+    }
+
+    #[test]
+    fn press_to_join_works_with_another_application_in_front() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let _l = test_lock();
+        test_reset();
+        let k = test_add_device(Kind::Keyboard, KBD3, 54);
+        test_front(true, test_foreground);
+        FRONT.store(7, Relaxed);
+        assert_eq!(test_input(&k.id, Input::Key { vk: 0x0D, scan: 0x1C, flags: 0 }), Some(RawKbmEvent::Press(k.id.clone())));
+        test_reset();
+    }
+
+    #[test]
+    fn the_cursor_switch_is_read_back() {
+        let _l = test_lock();
+        assert!(show_cursors(), "on by default");
+        set_show_cursors(false);
+        assert!(!show_cursors());
+        set_show_cursors(true);
+        assert!(show_cursors());
     }
 
     static POINTER_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);

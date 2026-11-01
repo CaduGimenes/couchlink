@@ -197,6 +197,8 @@ class DaemonState {
     this.hideKeys = 'Ctrl+Shift+H',
     this.hostControl = true,
     this.controlKeys = 'Ctrl+Shift+K',
+    this.showCursors = true,
+    this.onlyInFront = true,
     this.dev = false,
   });
 
@@ -226,6 +228,12 @@ class DaemonState {
   /// and mouse over to it and back (`off` when off).
   final bool hostControl;
   final String controlKeys;
+
+  /// Couchlink draws a cursor in the game of a player with a keyboard and mouse (`set_show_cursors`).
+  final bool showCursors;
+
+  /// Keyboards and mice control the games only while a game, the desktop or no window is in front (`set_only_in_front`).
+  final bool onlyInFront;
   final bool dev;
 
   Device? device(String id) {
@@ -279,6 +287,8 @@ class DaemonState {
       hideKeys: _str(j['hide_keys'], 'Ctrl+Shift+H'),
       hostControl: j['host_control'] != false,
       controlKeys: _str(j['control_keys'], 'Ctrl+Shift+K'),
+      showCursors: j['show_cursors'] != false,
+      onlyInFront: j['only_in_front'] != false,
       dev: j['dev'] == true,
     );
   }

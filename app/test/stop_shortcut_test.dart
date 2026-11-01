@@ -47,6 +47,25 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect((fake.state as DaemonState).hostControl, isFalse);
     expect((fake.state as DaemonState).controlKeys, 'Ctrl+Shift+K');
+
+    // The two input switches start on and turn off (and back on) on their own.
+    expect((fake.state as DaemonState).onlyInFront, isTrue);
+    expect((fake.state as DaemonState).showCursors, isTrue);
+    await tester.ensureVisible(byKey('only-in-front'));
+    await tester.tap(byKey('only-in-front'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect((fake.state as DaemonState).onlyInFront, isFalse);
+    expect((fake.state as DaemonState).showCursors, isTrue);
+    await tester.ensureVisible(byKey('show-cursors'));
+    await tester.tap(byKey('show-cursors'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect((fake.state as DaemonState).showCursors, isFalse);
+    expect((fake.state as DaemonState).onlyInFront, isFalse);
+    expect((fake.state as DaemonState).hostControl, isFalse, reason: 'host control stays as it was');
+    await tester.ensureVisible(byKey('only-in-front'));
+    await tester.tap(byKey('only-in-front'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect((fake.state as DaemonState).onlyInFront, isTrue);
     await tester.ensureVisible(byKey('control-keys-off'));
     await tester.tap(byKey('control-keys-off'));
     await tester.pump(const Duration(milliseconds: 100));

@@ -54,6 +54,12 @@ abstract class CouchClient extends ChangeNotifier {
   /// Host control on or off, and the keys that hand every keyboard and mouse over (`set_host_control`); null parts stay.
   Future<String?> setHostControl({bool? on, String? keys});
 
+  /// Couchlink's own cursor for a player with a keyboard and mouse on or off (`set_show_cursors`).
+  Future<String?> setShowCursors(bool on);
+
+  /// Keyboards and mice control the games only while a game is in front, on or off (`set_only_in_front`).
+  Future<String?> setOnlyInFront(bool on);
+
   /// True while couchlinkd is downloading a fresh catalog.
   bool get catalogRefreshing => false;
 

@@ -36,6 +36,8 @@ Daemon to client (events, no id): `{"event": "<name>", ...}`
 | `identify` | `seat` | Rumbles the seat's gamepads for 400 ms and flashes their LED in the seat colour. Keyboards: no-op. |
 | `set_layout` | `layout`: `auto` \| `lr` \| `tb` \| `grid` \| `per_display` | |
 | `set_fps_limit` | `fps`: 0 (no limit) or 10 to 360 | Saved (`<state>/settings.json`); every game copy of the next session is held to it. |
+| `set_show_cursors` | `on` (bool) | Saved; default on. Couchlink draws its own arrow in the game copy of a player with a keyboard and mouse; off draws none (the game's own cursor shows). Applies to copies started afterwards. |
+| `set_only_in_front` | `on` (bool) | Saved; default on. While a window of another application is in front, the keyboards and mice feed nothing to the game copies; a game copy, the desktop or no window in front lets input through. |
 | `set_display_used` | `display` (display id), `used` (bool) | Which displays the session may use. The primary display is used by default. |
 | `subscribe_input` | `on` (bool) | When on, `input` events stream at about 30 Hz while any seated device moves. |
 | `debug_press` | `device`, `button` (`south` etc.) | Only with `--dev`: acts as if the button went down and up. For tests. |
@@ -98,6 +100,8 @@ Daemon to client (events, no id): `{"event": "<name>", ...}`
 - `fps_limit`: frames per second every game copy is held to, 0 for none (`set_fps_limit`). Linux holds every game to
   it through gamescope; on both systems games that draw through DXVK or VKD3D get `DXVK_FRAME_RATE` and
   `VKD3D_FRAME_RATE`. With 0, a recipe's `window.fps_limit` applies.
+
+- `show_cursors`, `only_in_front`: the two switches above (`set_show_cursors`, `set_only_in_front`), both true by default.
 
 - `devices[].id`: `pad:<SDL joystick instance id>` for gamepads, `kbm:system` for the combined system keyboard and mouse. Ids are unique for the life of the connection.
 - `devices[].family`: `xbox` \| `playstation` \| `switch` \| `steam` \| `generic` \| `kbm`.

@@ -118,6 +118,12 @@ pub struct State {
     /// The keys that hand every keyboard and mouse to the game under the pointer and back, `off` when off.
     #[serde(default = "default_control_keys")]
     pub control_keys: String,
+    /// Couchlink draws a cursor in the game copy of a player with a keyboard and mouse (`set_show_cursors`).
+    #[serde(default = "default_true")]
+    pub show_cursors: bool,
+    /// Keyboards and mice control the games only while a game, the desktop or no window is in front (`set_only_in_front`).
+    #[serde(default = "default_true")]
+    pub only_in_front: bool,
     pub dev: bool,
 }
 

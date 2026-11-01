@@ -679,6 +679,32 @@ class _BindingsTab extends StatelessWidget {
             t('A keyboard or mouse no player has works in whichever game the pointer is over. Takes effect from the next start.'),
             style: txt(context, size: 11, color: c.ink3, height: 1.35),
           ),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(child: Text(t('Keyboards and mice only control the games while a game is in front'), style: txt(context, size: 12, weight: FontWeight.w600, color: c.ink2))),
+            Switch(
+              key: const ValueKey('only-in-front'),
+              value: st.onlyInFront,
+              onChanged: (on) => runCmd(context, () => client.setOnlyInFront(on)),
+            ),
+          ]),
+          Text(
+            t('Typing or clicking in another app, like Discord, changes nothing in the games. Works on the desktop too.'),
+            style: txt(context, size: 11, color: c.ink3, height: 1.35),
+          ),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(child: Text(t('Show a cursor for each player'), style: txt(context, size: 12, weight: FontWeight.w600, color: c.ink2))),
+            Switch(
+              key: const ValueKey('show-cursors'),
+              value: st.showCursors,
+              onChanged: (on) => runCmd(context, () => client.setShowCursors(on)),
+            ),
+          ]),
+          Text(
+            t('Couchlink draws an arrow for a player on a keyboard and mouse. Turn it off if the game draws its own. Takes effect from the next start.'),
+            style: txt(context, size: 11, color: c.ink3, height: 1.35),
+          ),
           const SizedBox(height: 12),
           const SizedBox(height: 4),
           Text(t('Close the games with a controller (hold both)'), style: txt(context, size: 12, weight: FontWeight.w600, color: c.ink2)),

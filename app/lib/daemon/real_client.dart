@@ -92,6 +92,10 @@ class DaemonClient extends CouchClient {
   @override
   Future<String?> setHostControl({bool? on, String? keys}) => _cmd('set_host_control', {'on': ?on, 'keys': ?keys});
   @override
+  Future<String?> setShowCursors(bool on) => _cmd('set_show_cursors', {'on': on});
+  @override
+  Future<String?> setOnlyInFront(bool on) => _cmd('set_only_in_front', {'on': on});
+  @override
   bool get catalogRefreshing => _refreshing;
   @override
   String? get catalogProblem => _catalogProblem;

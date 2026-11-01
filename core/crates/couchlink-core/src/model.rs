@@ -20,6 +20,8 @@ pub struct Model {
     hide_keys: String,
     host_control: bool,
     control_keys: String,
+    show_cursors: bool,
+    only_in_front: bool,
     dev: bool,
 }
 
@@ -42,7 +44,7 @@ impl Model {
             charging: false,
             seat: None,
         });
-        Model { seats, displays: Vec::new(), used_overrides: HashMap::new(), layout: Layout::Auto, screens: Vec::new(), fps_limit: 0, stop_keys: crate::shortcut::DEFAULT_KEYS.to_string(), stop_pad: crate::shortcut::DEFAULT_PAD.to_string(), front_keys: crate::shortcut::DEFAULT_FRONT_KEYS.to_string(), hide_keys: crate::shortcut::DEFAULT_HIDE_KEYS.to_string(), host_control: true, control_keys: crate::shortcut::DEFAULT_CONTROL_KEYS.to_string(), dev }
+        Model { seats, displays: Vec::new(), used_overrides: HashMap::new(), layout: Layout::Auto, screens: Vec::new(), fps_limit: 0, stop_keys: crate::shortcut::DEFAULT_KEYS.to_string(), stop_pad: crate::shortcut::DEFAULT_PAD.to_string(), front_keys: crate::shortcut::DEFAULT_FRONT_KEYS.to_string(), hide_keys: crate::shortcut::DEFAULT_HIDE_KEYS.to_string(), host_control: true, control_keys: crate::shortcut::DEFAULT_CONTROL_KEYS.to_string(), show_cursors: true, only_in_front: true, dev }
     }
 
     pub fn dev(&self) -> bool {
@@ -121,6 +123,24 @@ impl Model {
 
     pub fn host_control(&self) -> bool {
         self.host_control
+    }
+
+    /// Couchlink's own cursor for a keyboard and mouse player on or off. True when it changed.
+    pub fn set_show_cursors(&mut self, on: bool) -> bool {
+        std::mem::replace(&mut self.show_cursors, on) != on
+    }
+
+    pub fn show_cursors(&self) -> bool {
+        self.show_cursors
+    }
+
+    /// Keyboards and mice control the games only while a game is in front, on or off. True when it changed.
+    pub fn set_only_in_front(&mut self, on: bool) -> bool {
+        std::mem::replace(&mut self.only_in_front, on) != on
+    }
+
+    pub fn only_in_front(&self) -> bool {
+        self.only_in_front
     }
 
     pub fn control_keys(&self) -> &str {
@@ -228,6 +248,8 @@ impl Model {
             hide_keys: self.hide_keys.clone(),
             host_control: self.host_control,
             control_keys: self.control_keys.clone(),
+            show_cursors: self.show_cursors,
+            only_in_front: self.only_in_front,
             dev: self.dev,
         }
     }
@@ -296,6 +318,19 @@ mod tests {
         assert!(m.set_fps_limit(5).is_err());
         assert!(m.set_fps_limit(1000).is_err());
         assert_eq!(m.set_fps_limit(0), Ok(true));
+    }
+
+    #[test]
+    fn the_cursor_and_in_front_switches_start_on_and_report_changes() {
+        let mut m = Model::new(false);
+        let s = m.state();
+        assert!(s.show_cursors && s.only_in_front);
+        assert!(!m.set_show_cursors(true));
+        assert!(m.set_show_cursors(false));
+        assert!(!m.state().show_cursors && m.state().only_in_front);
+        assert!(!m.set_only_in_front(true));
+        assert!(m.set_only_in_front(false));
+        assert!(!m.state().only_in_front && !m.state().show_cursors);
     }
 
     #[test]
