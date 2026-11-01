@@ -13,6 +13,7 @@ import '../theme/tokens.dart';
 import 'app_state.dart';
 import 'icons.dart';
 import 'kit.dart';
+import 'layouts_ui.dart';
 import 'screens_controller.dart';
 import 'shell.dart';
 import 'status.dart';
@@ -863,8 +864,17 @@ class _SplitEditor extends StatelessWidget {
                       Text('${e.display.resolution} · ${e.display.hzLabel} · ${n == 0 ? 'nobody yet' : '$n ${n == 1 ? 'player' : 'players'}'}', style: txt(context, size: 12.5, color: c.ink3, height: 1.4)),
                     ]),
                   ),
+                  CButton(
+                    key: const ValueKey('editor-save-layout'),
+                    label: t('Save layout'),
+                    leading: CIcon(iconSave, size: 14, color: n > 0 ? c.ink : c.ink3, strokeWidth: 1.8),
+                    onTap: n > 0 ? () => saveLayoutDialog(context, ctl, displayId) : null,
+                  ),
+                  const SizedBox(width: 8),
                   CButton(key: const ValueKey('editor-done'), label: t('Done'), primary: true, onTap: () => Navigator.of(context).pop()),
                 ]),
+                const SizedBox(height: 16),
+                LayoutsRow(ctl: ctl, displayId: displayId),
                 const SizedBox(height: 16),
                 Wrap(spacing: 22, runSpacing: 16, crossAxisAlignment: WrapCrossAlignment.start, children: [
                   SizedBox(

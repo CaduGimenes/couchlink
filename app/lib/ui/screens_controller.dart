@@ -88,6 +88,7 @@ class ScreensController extends ChangeNotifier {
   ScreensController(this.client) {
     client.addListener(_onClient);
     _onClient();
+    unawaited(loadLayouts());
   }
 
   final CouchClient client;
@@ -104,8 +105,11 @@ class ScreensController extends ChangeNotifier {
 
   DaemonState get state => client.state ?? DaemonState.empty;
 
+  bool _disposed = false;
+
   @override
   void dispose() {
+    _disposed = true;
     client.removeListener(_onClient);
     super.dispose();
   }
@@ -289,6 +293,63 @@ class ScreensController extends ChangeNotifier {
     if (e?.custom == null) return;
     e!.custom![seat] = box;
     notifyListeners();
+  }
+
+  // ---- saved layouts
+
+  /// The saved layouts and each game's pinned layout, as the daemon last said.
+  LayoutList layouts = const LayoutList([]);
+
+  Future<void> loadLayouts() => _layoutsDone(client.listLayouts());
+
+  /// Takes the daemon's answer: the new list, or its error text (the list stays as it was).
+  Future<String?> _layoutsDone(Future<LayoutList> call) async {
+    final r = await call;
+    if (_disposed) return r.error;
+    if (r.error == null) layouts = r;
+    notifyListeners();
+    return r.error;
+  }
+
+  /// Saves the screen as it is under [name]. Returns null or the daemon's error text.
+  Future<String?> saveLayout(String displayId, String name) {
+    final e = byId(displayId);
+    if (e == null || e.seats.isEmpty) return Future.value(t('Add players to this screen first'));
+    return _layoutsDone(client.saveLayout(name, e.toArrangement()));
+  }
+
+  Future<String?> renameLayout(String id, String name) => _layoutsDone(client.renameLayout(id, name));
+
+  Future<String?> deleteLayout(String id) => _layoutsDone(client.deleteLayout(id));
+
+  /// Puts a saved layout on a screen, keeping its players. Returns a message for the user when it cannot, else null.
+  String? applyLayout(String displayId, LayoutInfo l) {
+    final e = byId(displayId);
+    if (e == null || e.seats.isEmpty) return t('Add players to this screen first');
+    final n = e.seats.length;
+    if (!l.fits(n)) return t('{name} is made for {players}; this screen has {count}', {'name': l.name, 'players': countPlayers(l.regions.length), 'count': n});
+    e.present = l.present;
+    if (!l.custom && l.regions.length == n && l.shape != null && (shapesFor[n] ?? const []).contains(l.shape)) {
+      e.custom = null;
+      e.shape = l.shape;
+      e.tree = buildShape(l.shape!, n);
+      if (l.sizes != null) applySizes(e.tree!, l.sizes!);
+    } else {
+      e.custom = {for (var i = 0; i < n; i++) e.seats[i]: Box.fromList(l.regions[i])};
+    }
+    _commit();
+    return null;
+  }
+
+  /// A built-in shape for the people on a screen: side by side (`lr`) or top and bottom (`tb`). With more than two
+  /// players they become columns or rows.
+  String? applyBuiltin(String displayId, String shape) {
+    final e = byId(displayId);
+    if (e == null || e.seats.isEmpty) return t('Add players to this screen first');
+    final n = e.seats.length;
+    if (n < 2) return t('One player already has the whole screen');
+    setShape(displayId, n == 2 ? shape : (shape == 'lr' ? 'cols' : 'rows'));
+    return null;
   }
 
   void beginGesture() => busy = true;

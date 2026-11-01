@@ -227,3 +227,5 @@ final IconSpec iconCustomLayout = IconSpec(24, [_rect(6, 7, 7, 6, 1), 'M15 15h3v
 final IconSpec iconGrip = IconSpec(24, const [], [_circle(9, 6, 1.4), _circle(9, 12, 1.4), _circle(9, 18, 1.4), _circle(15, 6, 1.4), _circle(15, 12, 1.4), _circle(15, 18, 1.4)]);
 final IconSpec iconArrowsH = IconSpec(24, ['m9 8-4 4 4 4', 'm15 8 4 4-4 4'], const []);
 final IconSpec iconArrowsV = IconSpec(24, ['m8 9 4-4 4 4', 'm8 15 4 4 4-4'], const []);
+final IconSpec iconPencil = IconSpec(24, ['M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z', 'm15 5 4 4'], const []);
+final IconSpec iconMore = IconSpec(24, const [], [_circle(12, 12, 1.6), _circle(19, 12, 1.6), _circle(5, 12, 1.6)]);

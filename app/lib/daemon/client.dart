@@ -103,6 +103,23 @@ abstract class CouchClient extends ChangeNotifier {
   Future<String?> setScreens(List<ScreenArrangement> screens);
   Future<void> subscribeInput(bool on);
 
+  // ---- saved screen layouts (docs/protocol.md, "Saved layouts")
+
+  /// `list_layouts`: every saved layout and the layout each game starts with.
+  Future<LayoutList> listLayouts();
+
+  /// `save_layout`: keeps [screen]'s regions (not its players) under [name]. [LayoutList.saved] is the new layout.
+  Future<LayoutList> saveLayout(String name, ScreenArrangement screen);
+
+  /// `rename_layout`.
+  Future<LayoutList> renameLayout(String layoutId, String name);
+
+  /// `delete_layout`: also unpins it from every game.
+  Future<LayoutList> deleteLayout(String layoutId);
+
+  /// `set_game_layout`: [recipe] starts with the saved layout [layoutId]; null for the screens as they are.
+  Future<LayoutList> setGameLayout(String recipe, String? layoutId);
+
   // ---- controller profiles (docs/protocol.md, "Controller profiles")
 
   /// `list_profiles`: the built-in starters first, then saved profiles by name.

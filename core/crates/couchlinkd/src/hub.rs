@@ -146,6 +146,8 @@ pub struct Hub {
     session_handle: Option<session::Handle>,
     /// The running game's own controls (recipe `controls`), played by seats that keep the default profile.
     recipe_controls: Option<Profile>,
+    /// Saved screen layouts and each game's pinned layout (`layouts.json`).
+    layouts: couchlink_core::layouts::Layouts,
 }
 
 impl Hub {
@@ -175,6 +177,7 @@ impl Hub {
             session_info: SessionInfo::idle(),
             session_handle: None,
             recipe_controls: None,
+            layouts: crate::layouts::load(),
             model: {
                 let mut m = Model::new(dev);
                 m.restore_screens(load_screens());
@@ -675,6 +678,30 @@ impl Hub {
                 }
                 Ok(json!({ "screens": self.model.screens() }))
             }
+            Command::ListLayouts => Ok(self.layouts_reply()),
+            Command::SaveLayout { name, screen } => {
+                let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+                let layout = self.layouts.save(&name, &screen, now)?;
+                crate::layouts::save(&self.layouts);
+                let mut reply = self.layouts_reply();
+                reply["layout"] = json!(layout);
+                Ok(reply)
+            }
+            Command::RenameLayout { layout_id, name } => {
+                self.layouts.rename(&layout_id, &name)?;
+                crate::layouts::save(&self.layouts);
+                Ok(self.layouts_reply())
+            }
+            Command::DeleteLayout { layout_id } => {
+                self.layouts.delete(&layout_id)?;
+                crate::layouts::save(&self.layouts);
+                Ok(self.layouts_reply())
+            }
+            Command::SetGameLayout { recipe, layout_id } => {
+                self.layouts.pin(&recipe, layout_id.as_deref())?;
+                crate::layouts::save(&self.layouts);
+                Ok(self.layouts_reply())
+            }
             Command::SubscribeInput { on } => {
                 if let Some(c) = self.clients.get_mut(&client) {
                     c.subscribed = on;
@@ -822,9 +849,22 @@ impl Hub {
 
     // ---- game sessions --------------------------------------------------------
 
+    fn layouts_reply(&self) -> serde_json::Value {
+        json!({ "layouts": self.layouts.layouts, "pins": self.layouts.pins })
+    }
+
     fn start_session(&mut self, recipe: &str, options: &std::collections::BTreeMap<String, String>, plain: bool) -> Result<serde_json::Value, String> {
         if self.session_info.active() || self.session_handle.is_some() {
             return Err("a game session is already running; stop it first".to_string());
+        }
+        // A game with a pinned layout starts on it: it becomes the current screens, before the seats are planned.
+        let mut screens = self.model.screens().to_vec();
+        if let Some(name) = self.layouts.apply_pin(recipe, &mut screens) {
+            if self.model.set_screens(screens)? {
+                save_screens(self.model.screens());
+                self.changed();
+            }
+            self.log(LogLevel::Info, format!("{recipe} starts with the layout {name:?}"));
         }
         let plan = self.session.plan(&self.model.state(), recipe, self.model.dev(), options, plain)?;
         let tx = self.self_tx.clone();

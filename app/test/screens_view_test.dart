@@ -136,7 +136,8 @@ void main() {
 
   testWidgets('Customise opens the editor: shapes, Equal sizes, the lists and the show-as choice', (tester) async {
     final fake = newFake();
-    await pumpApp(tester, fake, view: AppView.screens);
+    // Taller than the usual window: the layouts row above the canvas pushes the driver offer down.
+    await pumpApp(tester, fake, view: AppView.screens, size: const Size(1400, 1100));
     await tester.tap(byKey('customise-disp:1'));
     await tester.pumpAndSettle();
     expect(byKey('shape-lr'), findsOneWidget);

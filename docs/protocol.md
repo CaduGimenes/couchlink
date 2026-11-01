@@ -191,6 +191,29 @@ to game launching.
 - When a seat leaves, it drops out of its screen and its region becomes empty space; the UI re-splits the screen and sends the corrected arrangement. When seats swap, the arrangement follows the players.
 - `State.screens` carries the current arrangement. A display without an entry is "as it is, nobody there".
 
+### Saved layouts
+
+A screen's regions can be kept under a name and used again on any screen, in any game. couchlinkd saves them in
+`layouts.json` in the state folder, with the layout each game starts with. Applying a layout to a screen in the UI is
+an ordinary `set_screens` with the layout's regions on that screen's players.
+
+| cmd | args | result / effect |
+|---|---|---|
+| `list_layouts` | none | `{"layouts": [Layout], "pins": {"<recipe id>": "<layout id>"}}`, layouts in the order they were saved. |
+| `save_layout` | `name`, `screen`: Screen | Saves the screen's regions, `shape`, `sizes`, `custom`, `present` and display (its `seats` and `on` are ignored). Replies like `list_layouts` plus `"layout"`, the new one. Error text if the name is empty, over 40 characters or used by another layout (case ignored), or the regions overlap, leave the screen or are under 5 percent. |
+| `rename_layout` | `layout_id`, `name` | Same checks on the name. Replies like `list_layouts`. |
+| `delete_layout` | `layout_id` | Deletes it and unpins it from every game. Replies like `list_layouts`. |
+| `set_game_layout` | `recipe` (recipe id), `layout_id` (or `null` / left out for none) | Makes the game start with that layout. Replies like `list_layouts`. |
+
+```json
+{"id": "l2", "name": "Stream", "display": "disp:DISPLAY1",
+ "regions": [[0.0, 0.0, 0.62, 1.0], [0.62, 0.0, 0.38, 0.55]],
+ "custom": true, "present": "virtual", "saved": 1761955200}
+```
+
+- `regions[i]` goes to the `i`th player on the screen it is applied to. A layout fits a screen with as many players as it has regions, or (a `custom` layout) fewer players, which take the first regions.
+- When `start_session` runs for a game with a pinned layout, couchlinkd first applies it to the screens, before the seats are planned: to the display it was saved from when that one is on and fits, else to the fitting screen with the most players. The result becomes the current screens (`screens.json`, `State.screens`). Nothing changes when the layout fits no screen.
+
 ## Controller profiles (rebinding)
 
 Each seat has an active profile that says what its controller sends: button remaps, stick and trigger shaping, gyro and layers.

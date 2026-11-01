@@ -183,6 +183,58 @@ class ScreenArrangement {
   }
 }
 
+/// A saved screen layout (`list_layouts`): one screen's regions kept under a name, for any game to use.
+class LayoutInfo {
+  const LayoutInfo({required this.id, required this.name, this.display = '', this.regions = const [], this.shape, this.custom = false, this.sizes, this.present = 'window', this.saved = 0});
+
+  final String id;
+  final String name;
+
+  /// The display it was saved from.
+  final String display;
+
+  /// `regions[i]` is where the `i`th player on the screen it is applied to plays.
+  final List<List<double>> regions;
+  final String? shape;
+  final bool custom;
+  final List<List<double>>? sizes;
+  final String present;
+
+  /// Unix seconds when it was saved.
+  final int saved;
+
+  /// Whether it can be applied to a screen with [players] players: as many regions, or (free rectangles) more.
+  bool fits(int players) => players > 0 && (regions.length == players || (custom && regions.length > players));
+
+  factory LayoutInfo.fromJson(Map<String, dynamic> j) {
+    final a = ScreenArrangement.fromJson({...j, 'seats': const <int>[]});
+    return LayoutInfo(
+      id: _str(j['id']),
+      name: _str(j['name']),
+      display: a.display,
+      regions: a.regions,
+      shape: a.shape,
+      custom: a.custom,
+      sizes: a.sizes,
+      present: a.present,
+      saved: j['saved'] is num ? (j['saved'] as num).toInt() : 0,
+    );
+  }
+}
+
+/// The reply of the layout commands: every saved layout, the layout each game (by recipe id) starts with, and for
+/// `save_layout` the one just saved. [error] is the daemon's text when the command failed.
+class LayoutList {
+  const LayoutList(this.layouts, {this.pins = const {}, this.saved, this.error});
+
+  final List<LayoutInfo> layouts;
+  final Map<String, String> pins;
+  final LayoutInfo? saved;
+  final String? error;
+
+  LayoutInfo? byId(String? id) => layouts.where((l) => l.id == id).firstOrNull;
+}
+
 class DaemonState {
   const DaemonState({
     this.devices = const [],
