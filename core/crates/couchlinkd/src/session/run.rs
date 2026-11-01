@@ -385,6 +385,7 @@ impl Run {
                 party,
                 cache_dir: self.plan.state_dir.join("cache"),
                 vars,
+                overlay: super::recipes::overlay_choices(&self.plan.state_dir).get(&recipe.id).copied(),
             };
             match prepare.prepare_seat(&ctx, &mut self.journal) {
                 Ok(mut prep) => {

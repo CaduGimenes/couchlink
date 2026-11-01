@@ -219,6 +219,20 @@ class FakeClient extends CouchClient {
     return null;
   }
 
+  /// What [setGameOverlay] was last given, per recipe.
+  final Map<String, bool?> overlayChoices = {};
+
+  @override
+  Future<String?> setGameOverlay(String recipe, bool? on) async {
+    final g = _games.where((g) => g.recipe == recipe).firstOrNull;
+    if (g == null) return 'no game $recipe';
+    if (g.steam != 'goldberg') return '${g.game} plays on real Steam, and Couchlink cannot bring Steam’s overlay into its copies';
+    overlayChoices[recipe] = on;
+    _games = [for (final x in _games) x.recipe == recipe ? x.withOverlay(on ?? false) : x];
+    notifyListeners();
+    return null;
+  }
+
   @override
   Future<String?> startSession(String recipe, {bool plain = false}) async {
     startedRecipes.add(recipe);

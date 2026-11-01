@@ -674,6 +674,21 @@ mod tests {
     }
 
     #[test]
+    fn the_overlay_choice_picks_the_steam_api_build() {
+        for (on, want32, want64) in [(true, &b"EXPERIMENTAL-32"[..], &b"EXPERIMENTAL-64"[..]), (false, &fake_pe(Bitness::X86)[..], &fake_pe(Bitness::X64)[..])] {
+            let (tmp, _base, copy, cache) = setup(if on { "ov-on" } else { "ov-off" });
+            let mut opts = t_opts();
+            // The recipe asks for the experimental build; the player's choice replaces that either way.
+            opts.goldberg = GoldbergOptions::from_recipe(&serde_json::json!({"experimental": !on})).unwrap().with_overlay(on);
+            prepare_with(&copy, SteamMode::Goldberg, &seat(2, 1), &cache, &opts).unwrap();
+            assert_eq!(std::fs::read(copy.join("steam_api64.dll")).unwrap(), want64);
+            assert_eq!(std::fs::read(copy.join("sub/Steam_API.dll")).unwrap(), want32);
+            assert_eq!(copy.join("steam_settings").join("configs.overlay.ini").exists(), on);
+            let _ = std::fs::remove_dir_all(&tmp);
+        }
+    }
+
+    #[test]
     fn goldberg_round_trip_on_hardlinked_copy() {
         let (tmp, base, copy, cache) = setup("rt");
         let base64 = std::fs::read(base.join("steam_api64.dll")).unwrap();

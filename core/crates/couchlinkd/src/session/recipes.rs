@@ -338,6 +338,38 @@ pub fn pick_program(state_dir: &Path, recipe: &str, exe: Option<&str>) -> Result
     std::fs::rename(&tmp, state_dir.join("programs.json")).map_err(|e| format!("cannot save programs.json: {e}"))
 }
 
+/// The in-game overlay (Shift+Tab) choices the player made (`<state>/overlay.json`: recipe id to on or off).
+pub fn overlay_choices(state_dir: &Path) -> std::collections::BTreeMap<String, bool> {
+    std::fs::read(state_dir.join("overlay.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+/// Save or (with `None`) forget the overlay choice for a game.
+pub fn set_overlay(state_dir: &Path, recipe: &str, on: Option<bool>) -> Result<(), String> {
+    let mut all = overlay_choices(state_dir);
+    match on {
+        Some(o) => all.insert(recipe.to_string(), o),
+        None => all.remove(recipe),
+    };
+    std::fs::create_dir_all(state_dir).map_err(|e| e.to_string())?;
+    let tmp = state_dir.join("overlay.json.tmp");
+    std::fs::write(&tmp, serde_json::to_string_pretty(&all).expect("serialises")).map_err(|e| format!("cannot save overlay.json: {e}"))?;
+    std::fs::rename(&tmp, state_dir.join("overlay.json")).map_err(|e| format!("cannot save overlay.json: {e}"))
+}
+
+/// Whether a game starts with the overlay when the player has not chosen: only a Goldberg recipe that asks for the
+/// experimental build (`goldberg.experimental`) does.
+pub fn overlay_default(r: &Recipe) -> bool {
+    r.steam == couchlink_core::recipe::SteamMode::Goldberg
+        && r.goldberg.as_ref().and_then(|g| couchlink_steam::GoldbergOptions::from_recipe(g).ok()).is_some_and(|g| g.experimental)
+}
+
+/// The overlay setting a session uses for a game: the player's choice, else the recipe's default. Only Goldberg games
+/// have an overlay Couchlink can bring (real Steam's cannot be loaded into a copy Couchlink starts).
+pub fn overlay_for(state_dir: &Path, r: &Recipe) -> bool {
+    r.steam == couchlink_core::recipe::SteamMode::Goldberg
+        && overlay_choices(state_dir).get(&r.id).copied().unwrap_or_else(|| overlay_default(r))
+}
+
 /// A program path the player picked, made relative to the game folder: `None` when it is not a file inside it.
 pub fn program_in(game_dir: &Path, exe: &str) -> Option<String> {
     let exe = exe.trim().replace('\\', "/");
@@ -520,6 +552,7 @@ pub fn game_info(locators: &[Locator], state_dir: &Path, r: &Recipe) -> GameInfo
         setup,
         controls: r.controls.is_some(),
         mode: r.mode,
+        overlay: overlay_for(state_dir, r),
         tips: r.tips.clone(),
         installs: r.fetch.iter().map(|f| couchlink_core::session::InstallInfo { name: f.name.clone(), source: f.source.clone(), license: f.license.clone() }).collect(),
     }
@@ -576,6 +609,30 @@ mod tests {
         assert_eq!(picked_programs(&state).get("try-steam-239140").map(String::as_str), Some("DevTools.exe"));
         pick_program(&state, "try-steam-239140", None).unwrap();
         assert!(picked_programs(&state).is_empty());
+    }
+
+    #[test]
+    fn the_overlay_choice_is_kept_per_game_and_defaults_from_the_recipe() {
+        let state = temp("overlay-state");
+        let goldberg = |extra: serde_json::Value| {
+            Recipe::parse(&serde_json::json!({
+                "schema": 1, "id": "g", "game": "G", "match": {"steamAppId": 480}, "steam": "goldberg", "goldberg": extra,
+                "launch": {"exe": "g.exe"}, "players": [2, 4]
+            }).to_string()).expect("valid recipe")
+        };
+        let plain = goldberg(serde_json::json!({}));
+        let asks = goldberg(serde_json::json!({"experimental": true}));
+        assert!(!overlay_for(&state, &plain), "off unless the recipe asked for the experimental build");
+        assert!(overlay_for(&state, &asks), "a recipe that asks for it keeps it on");
+        set_overlay(&state, "g", Some(true)).unwrap();
+        assert!(overlay_for(&state, &plain));
+        set_overlay(&state, "g", Some(false)).unwrap();
+        assert!(!overlay_for(&state, &asks), "the player's choice wins");
+        assert_eq!(overlay_choices(&state).get("g"), Some(&false));
+        set_overlay(&state, "g", None).unwrap();
+        assert!(overlay_choices(&state).is_empty() && overlay_for(&state, &asks));
+        let shared = Recipe::parse(&serde_json::json!({"schema": 1, "id": "s", "game": "S", "steam": "shared", "launch": {"exe": "s.exe"}, "players": [2, 4]}).to_string()).unwrap();
+        assert!(!overlay_default(&shared), "real-Steam games start without it");
     }
 
     #[test]

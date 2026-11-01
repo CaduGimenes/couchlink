@@ -68,6 +68,8 @@ pub struct PrepareCtx<'a> {
     pub cache_dir: PathBuf,
     /// The seat's template variables so far, for expanding the game's command line.
     pub vars: BTreeMap<String, String>,
+    /// The player's in-game overlay choice for this game (`set_game_overlay`); none: what the recipe says.
+    pub overlay: Option<bool>,
 }
 
 /// What per-seat setup hands back to the runner.
@@ -180,6 +182,16 @@ impl Config {
             Some(e) => Some(recipes::program_in(&dir, e).ok_or_else(|| format!("{e} is not a program in the folder of {} ({})", r.game, dir.display()))?),
         };
         recipes::pick_program(&self.state_dir, recipe, exe.as_deref())
+    }
+
+    /// `set_game_overlay`: the in-game overlay (Shift+Tab) for a Goldberg game from the next start on, or with `None`
+    /// back to what the recipe says. Games on real Steam have none to give.
+    pub fn set_game_overlay(&self, recipe: &str, on: Option<bool>) -> Result<(), String> {
+        let r = self.load().recipes.into_iter().find(|r| r.id == recipe).ok_or_else(|| format!("no game {recipe}"))?;
+        if r.steam != couchlink_core::recipe::SteamMode::Goldberg {
+            return Err(format!("{} plays on real Steam, and Couchlink cannot bring Steam's overlay into its copies", r.game));
+        }
+        recipes::set_overlay(&self.state_dir, recipe, on)
     }
 
     fn try_game(&self, recipe: &str) -> Result<(couchlink_core::Recipe, PathBuf), String> {

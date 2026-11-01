@@ -145,6 +145,13 @@ pub enum Command {
         #[serde(default)]
         exe: Option<String>,
     },
+    /// Give every copy of a Goldberg game the in-game overlay (Shift+Tab) from the next start (`true`), or the regular
+    /// build without it (`false`); `null` goes back to what the recipe says.
+    SetGameOverlay {
+        recipe: String,
+        #[serde(default)]
+        on: Option<bool>,
+    },
     StartSession {
         recipe: String,
         /// The player's choices for the recipe's `options`: name to chosen value. Left out: the defaults.
@@ -404,6 +411,11 @@ mod tests {
             Command::SetGameProgram { recipe: "try-steam-239140".into(), exe: Some("DyingLightGame.exe".into()) }
         );
         assert_eq!(parse(json!({"id": 24, "cmd": "set_game_program", "recipe": "try-steam-239140"})).cmd, Command::SetGameProgram { recipe: "try-steam-239140".into(), exe: None });
+        assert_eq!(
+            parse(json!({"id": 26, "cmd": "set_game_overlay", "recipe": "b2", "on": true})).cmd,
+            Command::SetGameOverlay { recipe: "b2".into(), on: Some(true) }
+        );
+        assert_eq!(parse(json!({"id": 27, "cmd": "set_game_overlay", "recipe": "b2"})).cmd, Command::SetGameOverlay { recipe: "b2".into(), on: None });
         assert_eq!(parse(json!({"id": 21, "cmd": "start_session", "recipe": "testgame"})).cmd, Command::StartSession { recipe: "testgame".into(), options: BTreeMap::new(), plain: false });
         assert_eq!(
             parse(json!({"id": 23, "cmd": "start_session", "recipe": "g", "options": {"FPS": "Yes"}})).cmd,

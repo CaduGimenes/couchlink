@@ -404,6 +404,7 @@ class _GameSheetState extends State<GameSheet> {
                                   ]),
                                 ),
                                 if (g.tier == Tier.tryIt && g.installed) _ProgramPicker(key: ValueKey('program-${g.id}'), recipe: g.id),
+                                if (g.overlay != null) _GameSettings(key: ValueKey('settings-${g.id}'), recipe: g.id, overlay: g.overlay!),
                                 if (g.setup.isNotEmpty) ...[
                                   const SizedBox(height: 18),
                                   Text('Before your first game', key: const ValueKey('sheet-setup'), style: txt(context, size: 13, weight: FontWeight.w600)),
@@ -514,6 +515,51 @@ class _GameSheetState extends State<GameSheet> {
           ]);
         });
       },
+    );
+  }
+}
+
+/// A game's own settings in its sheet. The in-game overlay (Shift+Tab) is the first; only games on the Steam emulator
+/// have one, so the section is not there for the others.
+class _GameSettings extends StatelessWidget {
+  const _GameSettings({super.key, required this.recipe, required this.overlay});
+
+  final String recipe;
+  final bool overlay;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final scope = Scope.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 18),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(t('Game settings'), key: const ValueKey('sheet-game-settings'), style: txt(context, size: 13, weight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(
+            child: Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+              Text(t('In-game overlay (Shift+Tab)'), style: txt(context, size: 13, weight: FontWeight.w600, color: c.ink2)),
+              const Tag('Experimental', key: ValueKey('overlay-tag')),
+            ]),
+          ),
+          Switch(
+            key: const ValueKey('game-overlay'),
+            value: overlay,
+            onChanged: (on) async {
+              final err = await scope.client.setGameOverlay(recipe, on);
+              if (err != null) scope.toaster.show(err, error: true);
+            },
+          ),
+        ]),
+        const SizedBox(height: 4),
+        Text(
+          t('Each player’s copy gets an overlay on Shift+Tab: friends, invites and achievements, for that player only. A few games crash with it; turn it off if yours does.'),
+          style: txt(context, size: 12, color: c.ink3, height: 1.35),
+        ),
+        const SizedBox(height: 4),
+        Text(t('Changing it takes effect from the next start.'), style: txt(context, size: 11, color: c.ink3, height: 1.35)),
+      ]),
     );
   }
 }
