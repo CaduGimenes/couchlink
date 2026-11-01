@@ -41,6 +41,9 @@ pub struct LaunchSpec {
     /// either (Windows: an empty keyboard and mouse feed, so the hook hides the real ones).
     #[cfg_attr(not(windows), allow(dead_code))]
     pub block_desktop_kbm: bool,
+    /// DLLs the hook loads into the copy (Steam's overlay for a game on real Steam; see `HookConfig::preload`).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub preload: Vec<PathBuf>,
 }
 
 /// A copy on Linux starts in a window of its seat's size and keeps its own data next to its copy.
@@ -419,6 +422,7 @@ mod tests {
             linux: None,
             log: None,
             block_desktop_kbm: false,
+            preload: Vec::new(),
         };
         let mut l = CommandLauncher.launch(&spec).unwrap();
         assert!(!l.hooked);

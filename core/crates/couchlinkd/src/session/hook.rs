@@ -191,6 +191,7 @@ impl Launcher for HookLauncher {
             hook_children: spec.hook_children,
             // Games that read controllers through DirectInput, Raw Input or HID see only this seat's.
             own_pads: Some(own_pad_paths(&spec.devices)),
+            preload: spec.preload.clone(),
         };
         if let Some(s) = stand_in_for(spec) {
             if let Some(launched) = launch_with_stand_in(spec, &s, &config, &mut feed, &mut kbm)? {
@@ -315,6 +316,7 @@ fn launch_as_seat_user(spec: &LaunchSpec, account: &couchlink_steam::AccountsCon
         fake_cursor: kbm.is_some() && super::rawkbm::show_cursors(),
         hook_children: spec.hook_children,
         own_pads: Some(own_pad_paths(&spec.devices)),
+        preload: spec.preload.clone(),
     };
     let s = stand_in_for(spec).ok_or_else(|| {
         format!("{} cannot run on its own Steam account yet: none of Couchlink's stand-in DLLs fits it", spec.exe.display())
@@ -516,6 +518,7 @@ mod tests {
             linux: None,
             log: None,
             block_desktop_kbm: false,
+            preload: Vec::new(),
         };
         let undoers = Undoers::new();
         register_undoers(&undoers);

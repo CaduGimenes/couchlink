@@ -172,17 +172,30 @@ void main() {
     expect(find.descendant(of: byKey('program-current'), matching: find.text('DyingLightGame.exe'), matchRoot: true), findsOneWidget);
   });
 
-  testWidgets('a Goldberg game has an in-game overlay switch; a game on real Steam has none', (tester) async {
+  testWidgets('a game on Steam (the emulator or real Steam) has an in-game overlay switch; a game without Steam has none', (tester) async {
     final fake = fastFake(games: const [
-      GameInfo(recipe: 'b2', game: 'Borderlands 2', installed: true, path: 'C:/b2', minPlayers: 2, maxPlayers: 4, steam: 'goldberg'),
-      GameInfo(recipe: 'sworn', game: 'Sworn', installed: true, path: 'C:/sworn', minPlayers: 2, maxPlayers: 4, steam: 'shared'),
+      GameInfo(recipe: 'b2', game: 'Borderlands 2', installed: true, path: 'C:/b2', minPlayers: 2, maxPlayers: 4, steam: 'goldberg', hasOverlay: true),
+      GameInfo(recipe: 'sworn', game: 'Sworn', installed: true, path: 'C:/sworn', minPlayers: 2, maxPlayers: 4, steam: 'shared', overlay: true, hasOverlay: true),
+      GameInfo(recipe: 'own', game: 'Own Game', installed: true, path: 'C:/own', minPlayers: 2, maxPlayers: 4),
     ]);
     await pumpApp(tester, fake, view: AppView.library, size: const Size(1400, 1300));
-    await tester.ensureVisible(byKey('game-sworn'));
+    await tester.ensureVisible(byKey('game-own'));
     await settle(tester);
-    await tester.tap(byKey('game-sworn'));
+    await tester.tap(byKey('game-own'));
     await settle(tester);
     expect(byKey('game-overlay'), findsNothing);
+    await tester.tap(byKey('sheet-close'));
+    await settle(tester);
+
+    // Sworn plays on real Steam: Steam's own overlay, on by default as when Steam starts it.
+    await tester.ensureVisible(byKey('game-sworn'));
+    await tester.tap(byKey('game-sworn'));
+    await settle(tester);
+    await tester.ensureVisible(byKey('game-overlay'));
+    expect(tester.widget<Switch>(byKey('game-overlay')).value, isTrue);
+    await tester.tap(byKey('game-overlay'));
+    await settle(tester);
+    expect(fake.overlayChoices['sworn'], isFalse);
 
     await tester.tap(byKey('sheet-close'));
     await settle(tester);

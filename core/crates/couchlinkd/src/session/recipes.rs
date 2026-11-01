@@ -356,18 +356,34 @@ pub fn set_overlay(state_dir: &Path, recipe: &str, on: Option<bool>) -> Result<(
     std::fs::rename(&tmp, state_dir.join("overlay.json")).map_err(|e| format!("cannot save overlay.json: {e}"))
 }
 
-/// Whether a game starts with the overlay when the player has not chosen: only a Goldberg recipe that asks for the
-/// experimental build (`goldberg.experimental`) does.
+/// Whether a game starts with the overlay when the player has not chosen: a game on real Steam does, as when Steam
+/// starts it; a Goldberg recipe only when it asks for the experimental build (`goldberg.experimental`).
 pub fn overlay_default(r: &Recipe) -> bool {
-    r.steam == couchlink_core::recipe::SteamMode::Goldberg
-        && r.goldberg.as_ref().and_then(|g| couchlink_steam::GoldbergOptions::from_recipe(g).ok()).is_some_and(|g| g.experimental)
+    real_steam(r)
+        || r.steam == couchlink_core::recipe::SteamMode::Goldberg
+            && r.goldberg.as_ref().and_then(|g| couchlink_steam::GoldbergOptions::from_recipe(g).ok()).is_some_and(|g| g.experimental)
 }
 
-/// The overlay setting a session uses for a game: the player's choice, else the recipe's default. Only Goldberg games
-/// have an overlay Couchlink can bring (real Steam's cannot be loaded into a copy Couchlink starts).
+/// A game on real Steam (the player's own, or each seat's own account): its overlay is Steam's own, which the hook
+/// loads into each copy (Windows).
+pub fn real_steam(r: &Recipe) -> bool {
+    cfg!(windows) && matches!(r.steam, couchlink_core::recipe::SteamMode::Shared | couchlink_core::recipe::SteamMode::Accounts)
+}
+
+/// True for a game that has an overlay Couchlink can bring: Goldberg's, or real Steam's.
+pub fn has_overlay(r: &Recipe) -> bool {
+    r.steam == couchlink_core::recipe::SteamMode::Goldberg || real_steam(r)
+}
+
+/// The overlay setting a session uses for a game: the player's choice, else the recipe's default.
 pub fn overlay_for(state_dir: &Path, r: &Recipe) -> bool {
-    r.steam == couchlink_core::recipe::SteamMode::Goldberg
-        && overlay_choices(state_dir).get(&r.id).copied().unwrap_or_else(|| overlay_default(r))
+    has_overlay(r) && overlay_choices(state_dir).get(&r.id).copied().unwrap_or_else(|| overlay_default(r))
+}
+
+/// Steam's overlay renderer, both bitnesses, from the Steam install: the hook loads the one that fits the copy.
+pub fn steam_overlay_dlls() -> Vec<std::path::PathBuf> {
+    let Some(root) = couchlink_steam::steam_root() else { return Vec::new() };
+    ["GameOverlayRenderer64.dll", "GameOverlayRenderer.dll"].iter().map(|n| root.join(n)).filter(|p| p.is_file()).collect()
 }
 
 /// A program path the player picked, made relative to the game folder: `None` when it is not a file inside it.
@@ -553,6 +569,7 @@ pub fn game_info(locators: &[Locator], state_dir: &Path, r: &Recipe) -> GameInfo
         controls: r.controls.is_some(),
         mode: r.mode,
         overlay: overlay_for(state_dir, r),
+        has_overlay: has_overlay(r),
         tips: r.tips.clone(),
         installs: r.fetch.iter().map(|f| couchlink_core::session::InstallInfo { name: f.name.clone(), source: f.source.clone(), license: f.license.clone() }).collect(),
     }
@@ -632,7 +649,12 @@ mod tests {
         set_overlay(&state, "g", None).unwrap();
         assert!(overlay_choices(&state).is_empty() && overlay_for(&state, &asks));
         let shared = Recipe::parse(&serde_json::json!({"schema": 1, "id": "s", "game": "S", "steam": "shared", "launch": {"exe": "s.exe"}, "players": [2, 4]}).to_string()).unwrap();
-        assert!(!overlay_default(&shared), "real-Steam games start without it");
+        assert_eq!(overlay_for(&state, &shared), cfg!(windows), "a real-Steam game starts with Steam's overlay, as from Steam (Windows)");
+        set_overlay(&state, "s", Some(false)).unwrap();
+        assert!(!overlay_for(&state, &shared));
+        let none = Recipe::parse(&serde_json::json!({"schema": 1, "id": "n", "game": "N", "steam": "none", "launch": {"exe": "n.exe"}, "players": [2, 4]}).to_string()).unwrap();
+        set_overlay(&state, "n", Some(true)).unwrap();
+        assert!(!overlay_for(&state, &none), "a game without Steam has no overlay to bring");
     }
 
     #[test]

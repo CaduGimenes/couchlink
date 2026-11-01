@@ -46,6 +46,10 @@ pub struct HookConfig {
     /// without XInput still sees only its player's. `Some(vec![])` hides them all; `None` leaves them alone.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub own_pads: Option<Vec<String>>,
+    /// DLLs loaded into the copy once the hooks are in, for example Steam's overlay renderer (both bitnesses may be
+    /// named: the one that does not fit is skipped).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub preload: Vec<PathBuf>,
 }
 
 /// Switches that are not part of the launch contract.

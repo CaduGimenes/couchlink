@@ -51,6 +51,7 @@ struct Config {
     bool hook_children = false;  // inject this DLL into every process this process starts
     bool hide_pads = false;  // own_pads was given: hide every game controller not in it
     std::vector<std::wstring> own_pads;  // this copy's controllers, as normalised device paths (pads_hook.cpp)
+    std::vector<std::wstring> preload;  // DLLs loaded into the copy once the hooks are in (Steam's overlay)
     uint32_t copy_id = 0;  // pid of the process the host injected first (suffix of renamed locks); 0 = this process
     uint32_t depth = 0;  // 0 for the process the host injected, +1 per child generation
     Json raw;  // the config exactly as received, handed on to children

@@ -64,7 +64,7 @@ class LibraryGame {
   /// The recipe brings pad controls for a game without pad support.
   final bool controls;
 
-  /// The in-game overlay (Shift+Tab) at the next start; null for a game that has none to give (not Goldberg).
+  /// The in-game overlay (Shift+Tab) at the next start; null for a game that has none to give (no Steam).
   final bool? overlay;
 
   /// How to play, and what Couchlink installs for the game.
@@ -238,7 +238,7 @@ String _steamText(String steam) => switch (steam) {
 LibraryGame libraryGameOf(GameInfo g) {
   for (final s in sampleGames) {
     if (s.id == g.recipe) {
-      return s.copyWith(name: g.game, installed: g.installed, minPlayers: g.minPlayers, maxPlayers: g.maxPlayers, steamAppId: g.steamAppId, setup: g.setup, controls: g.controls, overlay: g.steam == 'goldberg' ? g.overlay : null, tips: g.tips, installs: g.installs);
+      return s.copyWith(name: g.game, installed: g.installed, minPlayers: g.minPlayers, maxPlayers: g.maxPlayers, steamAppId: g.steamAppId, setup: g.setup, controls: g.controls, overlay: g.hasOverlay ? g.overlay : null, tips: g.tips, installs: g.installs);
     }
   }
   var h = 0;
@@ -262,7 +262,7 @@ LibraryGame libraryGameOf(GameInfo g) {
     steamAppId: g.steamAppId,
     setup: g.setup,
     controls: g.controls,
-    overlay: g.steam == 'goldberg' ? g.overlay : null,
+    overlay: g.hasOverlay ? g.overlay : null,
     tips: g.tips,
     installs: g.installs,
   );

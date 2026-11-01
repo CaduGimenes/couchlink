@@ -84,10 +84,13 @@ pub struct GameInfo {
     /// `instances` (a copy per player) or `native` (one copy, the game's own split-screen).
     #[serde(default)]
     pub mode: crate::recipe::Mode,
-    /// Each copy gets the in-game overlay (Shift+Tab) at the next start: the player's choice, else the recipe's.
-    /// Only Goldberg games have one; for the others it is always false.
+    /// Each copy gets the in-game overlay (Shift+Tab) at the next start: the player's choice, else the default.
+    /// Always false for a game that has none (`has_overlay`).
     #[serde(default)]
     pub overlay: bool,
+    /// The game has an overlay Couchlink can bring: Goldberg's, or Steam's own for a game on real Steam (Windows).
+    #[serde(default)]
+    pub has_overlay: bool,
     /// How to play (the recipe's `tips`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tips: Vec<String>,

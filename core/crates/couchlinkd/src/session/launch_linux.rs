@@ -398,6 +398,7 @@ mod tests {
             linux: None,
             log: None,
             block_desktop_kbm: false,
+            preload: Vec::new(),
         }
     }
 

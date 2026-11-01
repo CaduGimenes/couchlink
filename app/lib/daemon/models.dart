@@ -506,6 +506,7 @@ class GameInfo {
     this.controls = false,
     this.native = false,
     this.overlay = false,
+    this.hasOverlay = false,
     this.tips = const [],
     this.installs = const [],
   });
@@ -537,8 +538,11 @@ class GameInfo {
   /// One copy for every player: the game splits the screen itself (`mode: native`).
   final bool native;
 
-  /// Each copy gets the in-game overlay (Shift+Tab) at the next start; only Goldberg games have one.
+  /// Each copy gets the in-game overlay (Shift+Tab) at the next start; false for a game without one.
   final bool overlay;
+
+  /// The game has an overlay Couchlink can bring: Goldberg's, or Steam's own for a game on real Steam (Windows).
+  final bool hasOverlay;
 
   /// How to play, in plain sentences.
   final List<String> tips;
@@ -561,6 +565,7 @@ class GameInfo {
         controls: controls,
         native: native,
         overlay: on,
+        hasOverlay: hasOverlay,
         tips: tips,
         installs: installs,
       );
@@ -592,6 +597,7 @@ class GameInfo {
       controls: j['controls'] == true,
       native: j['mode'] == 'native',
       overlay: j['overlay'] == true,
+      hasOverlay: j['has_overlay'] == true || j['steam'] == 'goldberg',
       tips: [if (j['tips'] is List) for (final x in j['tips'] as List) if (x is String) x],
       installs: [
         if (j['installs'] is List)

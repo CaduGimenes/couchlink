@@ -497,6 +497,15 @@ impl Run {
         Ok(v)
     }
 
+    /// DLLs the hook loads into a game copy: Steam's overlay, for a game on real Steam with the overlay on.
+    fn preload(&self, seat: Option<usize>) -> Vec<PathBuf> {
+        let recipe = &self.plan.recipe;
+        if seat.is_none() || !super::recipes::real_steam(recipe) || !super::recipes::overlay_for(&self.plan.state_dir, recipe) {
+            return Vec::new();
+        }
+        super::recipes::steam_overlay_dlls()
+    }
+
     fn spec(&self, seat: Option<usize>, exe: &str, args: &str, dir: &Path, vars: &BTreeMap<String, String>) -> Result<LaunchSpec, String> {
         let recipe = &self.plan.recipe;
         let exe_path = resolve(&expand(exe, vars)?, dir);
@@ -512,6 +521,10 @@ impl Run {
         if let (Some(_), Some(id), SteamMode::Shared | SteamMode::Accounts) = (seat, recipe.matching.steam_app_id, recipe.steam) {
             env.entry("SteamAppId".into()).or_insert_with(|| id.to_string());
             env.entry("SteamGameId".into()).or_insert_with(|| id.to_string());
+        }
+        // Steam's overlay (`preload`) finds the game it draws for by this one, as in a game Steam started.
+        if let (Some(_), Some(id)) = (seat, env.get("SteamGameId").cloned()) {
+            env.entry("SteamOverlayGameId".into()).or_insert(id);
         }
         let cwd = match (&recipe.launch.cwd, seat) {
             (Some(c), Some(_)) => resolve(&expand(c, vars)?, dir),
@@ -536,6 +549,7 @@ impl Run {
             run_as: None,
             linux: None,
             log: seat.map(|i| crate::logfile::copy_log(&recipe.id, self.seats[i].plan.seat)),
+            preload: self.preload(seat),
             block_desktop_kbm: seat.is_some_and(|i| {
                 let has_kbm = |devs: &[String]| devs.iter().any(|d| d == "kbm:system" || super::rawkbm::is_kbm_id(d));
                 // With host control on every copy gets a feed, so the desktop's keys reach only the copy under the pointer.
@@ -609,6 +623,7 @@ impl Run {
             linux: None,
             log: None,
             block_desktop_kbm: false,
+            preload: Vec::new(),
         };
         let launched = self.deps.launcher.launch(&spec)?;
         self.helpers.push(launched.child);

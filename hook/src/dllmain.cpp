@@ -132,6 +132,10 @@ bool ParseConfig(const Json& j, Config& cfg, std::string& err) {
             cfg.own_pads.push_back(w);
         }
     }
+    if (const Json* v = j.get("preload"); v && v->isArr()) {
+        for (const Json& p : v->a)
+            if (p.isStr() && !p.s.empty()) cfg.preload.push_back(Widen(p.s));
+    }
     if (const Json* v = j.get("copy_id")) cfg.copy_id = v->isNum() ? static_cast<uint32_t>(v->asInt(0)) : 0;
     if (const Json* v = j.get("depth")) cfg.depth = v->isNum() ? static_cast<uint32_t>(v->asInt(0)) : 0;
     cfg.raw = j;
@@ -171,6 +175,23 @@ std::string OpenKbmFeed(const std::wstring& name) {
 }
 
 std::string ApplyConfig(const Json& c);
+
+// Loads the config's `preload` DLLs (Steam's overlay renderer, which hooks the game's drawing and Shift+Tab like
+// Steam does for a game it starts). A DLL of the other bitness fails to load and is skipped.
+void Preload() {
+    for (const std::wstring& path : g_cfg.preload) {
+        if (LoadLibraryW(path.c_str())) {
+            Note("preloaded " + Narrow(path));
+        } else if (GetLastError() != ERROR_BAD_EXE_FORMAT) {
+            Note("cannot preload " + Narrow(path) + " (error " + std::to_string(GetLastError()) + ")");
+        }
+    }
+}
+
+DWORD WINAPI PreloadThread(LPVOID) {
+    Preload();
+    return 0;
+}
 
 std::string Handle(const std::string& line) {
     Json req;
@@ -234,6 +255,16 @@ std::string ApplyConfig(const Json& c) {
     InstallChildren();
     InstallPads();
     ApplyHooks();
+    if (!g_cfg.preload.empty()) {
+        if (std::string(g_load_mode) == "proxy") {
+            // The stand-in runs under the loader lock, where no library may be loaded: a thread loads them as soon
+            // as the lock is free, still before the game's own code gets far.
+            HANDLE t = CreateThread(nullptr, 0, PreloadThread, nullptr, 0, nullptr);
+            if (t) CloseHandle(t);
+        } else {
+            Preload();  // injected: the copy is still held, so they are in before it runs
+        }
+    }
     return StatusJson();
 }
 

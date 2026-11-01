@@ -519,8 +519,8 @@ class _GameSheetState extends State<GameSheet> {
   }
 }
 
-/// A game's own settings in its sheet. The in-game overlay (Shift+Tab) is the first; only games on the Steam emulator
-/// have one, so the section is not there for the others.
+/// A game's own settings in its sheet. The in-game overlay (Shift+Tab) is the first; only games on Steam (the emulator or
+/// real Steam) have one, so the section is not there for the others.
 class _GameSettings extends StatelessWidget {
   const _GameSettings({super.key, required this.recipe, required this.overlay});
 
