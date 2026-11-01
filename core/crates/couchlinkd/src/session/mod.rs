@@ -33,6 +33,7 @@ pub mod sandbox_linux;
 #[cfg(target_os = "linux")]
 pub mod uipad_linux;
 pub mod padfeed;
+pub mod prefix;
 pub mod present;
 pub mod rawkbm;
 pub mod recipes;
@@ -243,7 +244,8 @@ impl Config {
         // The helpers the recipe looks for come first: their step is the one the player is most likely missing.
         let mut recipe = recipe;
         let found = recipes::resolve_finds(&self.state_dir, &recipe)?;
-        if let Some(r) = recipe.requires.iter().find(|r| !recipes::require_met(&game_dir, r)) {
+        let folders = recipes::recipe_machine_vars(&recipe);
+        if let Some(r) = recipe.requires.iter().find(|r| !recipes::require_met(&game_dir, r, &folders)) {
             return Err(format!("{}: {}", recipe.game, r.hint));
         }
         if !recipes::launch_exe_present(&game_dir, &recipe) {

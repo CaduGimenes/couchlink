@@ -2,7 +2,7 @@
 //! Steam, first, launch, place, run, end) so that nothing a game does can block the daemon's async loop.
 
 use super::copies;
-use super::edits::{save_redirects, SeatFiles};
+use super::edits::{save_redirects, save_redirects_with, SeatFiles};
 use super::launch::{job::Job, wait_for, LaunchSpec, LinuxSeat, PORT_WAIT};
 use super::window::{close_windows, find_window_process, kill_process, process_alive, Placer};
 use super::{Deps, PrepareCtx};
@@ -406,7 +406,14 @@ impl Run {
             let outcome = (|| -> Result<(), String> {
                 let vars = self.vars(idx)?;
                 let seat_root = copies::seat_dir(&instances, self.seats[idx].plan.seat);
-                self.seats[idx].saves = save_redirects(recipe, &seat_root, &vars)?;
+                self.seats[idx].saves = match self.profiles(idx) {
+                    // Through Proton the seat's prefix is its own, so its save folders are used there as they are.
+                    Some((steam, own)) => {
+                        super::prefix::seed_profile(&steam, &own)?;
+                        save_redirects_with(recipe, &vars, |_, from| from.strip_prefix(&steam).ok().map(|rest| own.join(rest)))?
+                    }
+                    None => save_redirects(recipe, &seat_root, &vars)?,
+                };
                 let s = &self.seats[idx];
                 let files = SeatFiles {
                     recipe,
@@ -474,7 +481,7 @@ impl Run {
     }
 
     fn recipe_vars(&self, mut v: BTreeMap<String, String>) -> Result<BTreeMap<String, String>, String> {
-        for (name, value) in super::recipes::machine_vars() {
+        for (name, value) in super::recipes::recipe_machine_vars(&self.plan.recipe) {
             v.entry(name).or_insert(value);
         }
         for (name, value) in &self.plan.options {
@@ -711,12 +718,28 @@ impl Run {
             rect: s.plan.rect,
             borderless: recipe.window.borderless,
             fps_limit: self.plan.fps_limit,
-            data_dir: copies::instances_root(&self.plan.state_dir, &self.plan.game_dir).join(&recipe.id).join(".seats").join(s.plan.seat.to_string()),
+            data_dir: self.seat_data_dir(idx),
             #[cfg(target_os = "linux")]
             sandbox_pid: s.ns.as_ref().map(|n| n.pid),
             #[cfg(not(target_os = "linux"))]
             sandbox_pid: None,
         }))
+    }
+
+    /// A Linux seat's own folder that outlives the session: its Proton prefix and its home.
+    fn seat_data_dir(&self, idx: usize) -> PathBuf {
+        let root = copies::instances_root(&self.plan.state_dir, &self.plan.game_dir);
+        root.join(&self.plan.recipe.id).join(".seats").join(self.seats[idx].plan.seat.to_string())
+    }
+
+    /// For a Windows game on Linux: the profile folder in the game's Steam prefix, and the one in the seat's own.
+    fn profiles(&self, idx: usize) -> Option<(PathBuf, PathBuf)> {
+        let steam = super::prefix::steam_profile(&self.plan.recipe)?;
+        #[cfg(target_os = "linux")]
+        let umu = super::launch_linux::Tools::find().umu.is_some();
+        #[cfg(not(target_os = "linux"))]
+        let umu = false;
+        Some((steam, super::prefix::seat_profile(&self.seat_data_dir(idx), umu)))
     }
 
     /// For `window.exe`: find the process that owns the seat's window and take it into a job of its own, so

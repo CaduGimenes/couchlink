@@ -98,13 +98,18 @@ fn save_folder_name(template: &str) -> String {
 /// The save redirects of one seat: every `files.saves` path under a machine folder, to a folder of its own in
 /// `<seat folder>/saves/`. The first time, that folder starts as a copy of what the real folder holds.
 pub fn save_redirects(recipe: &Recipe, seat_root: &Path, vars: &BTreeMap<String, String>) -> Result<Vec<(PathBuf, PathBuf)>, String> {
+    save_redirects_with(recipe, vars, |template, _| Some(seat_root.join("saves").join(save_folder_name(template))))
+}
+
+/// The same with the seat's folder for each save path chosen by `to` (template, real path); `None` leaves one out.
+pub fn save_redirects_with(recipe: &Recipe, vars: &BTreeMap<String, String>, to: impl Fn(&str, &Path) -> Option<PathBuf>) -> Result<Vec<(PathBuf, PathBuf)>, String> {
     let mut out = Vec::new();
     for template in &recipe.files.saves {
         if machine_prefix(template).is_none() {
             continue;
         }
         let from = PathBuf::from(expand(template, vars).map_err(|e| format!("files.saves: {e}"))?);
-        let to = seat_root.join("saves").join(save_folder_name(template));
+        let Some(to) = to(template, &from) else { continue };
         seed(&from, &to)?;
         out.push((from, to));
     }
@@ -134,7 +139,7 @@ fn seed(from: &Path, to: &Path) -> Result<(), String> {
     }
 }
 
-fn tree_size(dir: &Path) -> u64 {
+pub fn tree_size(dir: &Path) -> u64 {
     let Ok(rd) = std::fs::read_dir(dir) else { return 0 };
     rd.flatten()
         .map(|e| match e.file_type() {

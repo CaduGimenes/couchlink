@@ -112,11 +112,11 @@ pub fn games_json_vars(state_dir: &Path, id: &str) -> std::collections::BTreeMap
 }
 
 /// True when the game folder meets one `requires` entry: the file exists and, if asked, holds the text.
-pub fn require_met(game_dir: &Path, r: &couchlink_core::recipe::Require) -> bool {
-    // A file of this PC is named through the folder variables, like `files.saves` ("$DOCUMENTS/My Games/..."); anything else
-    // is in the game folder.
+pub fn require_met(game_dir: &Path, r: &couchlink_core::recipe::Require, folders: &std::collections::BTreeMap<String, String>) -> bool {
+    // A file of this PC is named through the folder variables (`recipe_machine_vars`), like `files.saves`
+    // ("$DOCUMENTS/My Games/..."); anything else is in the game folder.
     let file = if r.file.starts_with('$') {
-        match couchlink_core::recipe::expand(&r.file, &machine_vars()) {
+        match couchlink_core::recipe::expand(&r.file, folders) {
             Ok(f) => f,
             Err(_) => return false,
         }
@@ -419,6 +419,14 @@ pub fn machine_vars() -> std::collections::BTreeMap<String, String> {
     v
 }
 
+/// The folder variables of `r`'s game: on Linux a Windows game's are in its Steam prefix (`prefix.rs`), else this PC's.
+pub fn recipe_machine_vars(r: &Recipe) -> std::collections::BTreeMap<String, String> {
+    match super::prefix::steam_profile(r) {
+        Some(user) => super::prefix::profile_vars(&user),
+        None => machine_vars(),
+    }
+}
+
 /// Resolve a recipe's `find` entries to folders: games.json wins, then a search of each `near` folder.
 /// Values come back with `$` doubled, ready to sit in `Recipe::vars`.
 pub fn resolve_finds(state_dir: &Path, recipe: &Recipe) -> Result<std::collections::BTreeMap<String, String>, String> {
@@ -496,7 +504,8 @@ pub fn game_info(locators: &[Locator], state_dir: &Path, r: &Recipe) -> GameInfo
         let hint = f.hint.clone()?;
         Some(couchlink_core::SetupStep { text: hint, done: path.is_some() && find_one(&set, &machine, name, f).is_some() })
     });
-    let requires = r.requires.iter().map(|q| couchlink_core::SetupStep { text: q.hint.clone(), done: path.as_deref().is_some_and(|p| require_met(p, q)) });
+    let folders = if r.requires.is_empty() { Default::default() } else { recipe_machine_vars(r) };
+    let requires = r.requires.iter().map(|q| couchlink_core::SetupStep { text: q.hint.clone(), done: path.as_deref().is_some_and(|p| require_met(p, q, &folders)) });
     let setup = finds.chain(requires).collect();
     GameInfo {
         recipe: r.id.clone(),
@@ -536,13 +545,14 @@ mod tests {
         let home = machine_vars().get("USERPROFILE").cloned().expect("a home folder");
         let marker = format!("couchlink-req-{}-{}.txt", std::process::id(), N.fetch_add(1, Ordering::Relaxed));
         let req = |file: &str| couchlink_core::recipe::Require { file: file.to_string(), hint: "h".into(), contains: None };
-        assert!(!require_met(&g, &req(&format!("$USERPROFILE/{marker}"))), "not there yet");
+        let m = machine_vars();
+        assert!(!require_met(&g, &req(&format!("$USERPROFILE/{marker}")), &m), "not there yet");
         std::fs::write(Path::new(&home).join(&marker), b"x").unwrap();
-        let met = require_met(&g, &req(&format!("$USERPROFILE/{marker}")));
+        let met = require_met(&g, &req(&format!("$USERPROFILE/{marker}")), &m);
         let _ = std::fs::remove_file(Path::new(&home).join(&marker));
         assert!(met, "found through $USERPROFILE, not inside the game folder");
         std::fs::write(g.join("Game.exe"), b"x").unwrap();
-        assert!(require_met(&g, &req("Game.exe")), "a plain path is still in the game folder");
+        assert!(require_met(&g, &req("Game.exe"), &m), "a plain path is still in the game folder");
     }
 
     #[test]
