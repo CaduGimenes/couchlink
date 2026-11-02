@@ -757,7 +757,7 @@ fn overlay_key(shift: &mut HashSet<u64>, seat: u64, copy: u32, vk: u16, flags: u
             if OVERLAY_COPY.swap(copy, Relaxed) == copy {
                 OVERLAY_COPY.store(0, Relaxed);
                 give_back_focus();
-            } else if let Some((front, _)) = focus().filter(|_| !cfg!(test)) {
+            } else if let Some((front, _)) = focus() {
                 std::thread::spawn(move || front(copy));
             }
         }
@@ -768,10 +768,6 @@ fn overlay_key(shift: &mut HashSet<u64>, seat: u64, copy: u32, vk: u16, flags: u
 
 /// The desktop takes the focus again, a moment after the overlay got the closing key.
 fn give_back_focus() {
-    // Tests leave the PC's own windows alone.
-    if cfg!(test) {
-        return;
-    }
     std::thread::spawn(|| {
         std::thread::sleep(std::time::Duration::from_millis(300));
         if let Some((_, back)) = focus().filter(|_| overlay_copy().is_none()) {

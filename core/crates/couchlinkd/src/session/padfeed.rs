@@ -256,11 +256,19 @@ pub fn attach_shared(name: &str, devices: &[String], share_with: Option<&str>) -
 /// `attach_shared` for a seat: the feed plays the seat's profile, and what the profile turns into keys and mouse
 /// input goes to the seat's keyboard and mouse feed `kbm`.
 pub fn attach_for_seat(name: &str, devices: &[String], seat: Option<usize>, kbm: Option<&str>, share_with: Option<&str>) -> Result<FeedGuard, String> {
-    let device = feed_device(devices).ok_or_else(|| "the seat has no controller".to_string())?;
+    // A player's copy gets a feed without a controller too, shown as unplugged, so a controller given to the player
+    // while the copy runs reaches it (`reassign`).
+    let device = match (feed_device(devices), seat) {
+        (Some(d), _) => d,
+        (None, Some(_)) => "",
+        (None, None) => return Err("the seat has no controller".to_string()),
+    };
     let mut feed = Feed::create_shared(name, share_with).map_err(|e| format!("cannot create the pad feed: {e}"))?;
     let mut reg = registry();
-    if let Some(state) = reg.latest.get(device) {
-        feed.write_state(&state.feed_state());
+    match reg.latest.get(device) {
+        Some(state) => feed.write_state(&state.feed_state()),
+        None if device.is_empty() => feed.set_connected(false),
+        None => {}
     }
     reg.next_id += 1;
     let id = reg.next_id;
@@ -330,6 +338,32 @@ pub fn publish_sample(device_id: &str, sample: &InputSample) {
     drop(reg);
     for (name, inputs) in kbm {
         super::rawkbm::push_pad(&name, &inputs);
+    }
+}
+
+/// Controllers moved between players while the copies run: each player's feed (`seats[i]` is player i's device list)
+/// follows the controller the player has now, or shows none when they have none. A feed whose controller stays is left
+/// as it is.
+pub fn reassign(seats: &[Vec<String>]) {
+    let mut reg = registry();
+    let Registry { entries, latest, .. } = &mut *reg;
+    for e in entries.iter_mut() {
+        let Some(seat) = e.seat else { continue };
+        let now = seats.get(seat).and_then(|d| feed_device(d)).unwrap_or("");
+        if e.device == now {
+            continue;
+        }
+        e.device = now.to_string();
+        e.state = ProcState::new();
+        e.keys.clear();
+        e.mouse.clear();
+        match latest.get(now) {
+            Some(state) => {
+                e.feed.set_connected(true);
+                e.feed.write_state(&state.feed_state());
+            }
+            None => e.feed.set_connected(false),
+        }
     }
 }
 
@@ -524,5 +558,27 @@ mod tests {
         assert_eq!(feed_device(&d), Some("pad:5"));
         assert_eq!(feed_device(&["kbm:system".to_string()]), None);
         assert!(attach("Local\\couchlink-pad-none-0", &["kbm:system".to_string()]).is_err());
+    }
+
+    #[test]
+    fn a_controller_given_to_a_player_while_the_copies_run_reaches_their_copy() {
+        let name = format!("Local\\couchlink-pad-test-reassign-{}", std::process::id());
+        // Player 2 starts with a keyboard only: a feed all the same, with no controller in it.
+        let _g = attach_for_seat(&name, &["kbm:system".to_string()], Some(1), None, None).unwrap();
+        let pressed = PadState::from_sdl(&[Button::South], 0, 0, 0, 0, 0, 0);
+        publish("pad:reassign-77", pressed);
+        let device = |reg: &Registry| reg.entries.iter().find(|e| e.seat == Some(1)).map(|e| e.device.clone());
+        assert_eq!(device(&registry()).as_deref(), Some(""));
+        reassign(&[vec![], vec!["pad:reassign-77".to_string()]]);
+        assert_eq!(device(&registry()).as_deref(), Some("pad:reassign-77"), "the controller moved to player 2 feeds their copy");
+        {
+            let reg = registry();
+            let e = reg.entries.iter().find(|e| e.seat == Some(1)).unwrap();
+            assert!(e.feed.is_connected(), "and shows as plugged in");
+        }
+        reassign(&[vec!["pad:reassign-77".to_string()], vec![]]);
+        let reg = registry();
+        let e = reg.entries.iter().find(|e| e.seat == Some(1)).unwrap();
+        assert!(e.device.is_empty() && !e.feed.is_connected(), "taken away again: unplugged for player 2");
     }
 }

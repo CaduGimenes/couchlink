@@ -468,8 +468,9 @@ impl Hub {
         }
         self.apply_pad_seats();
         if self.session_info.active() {
-            // Keyboards and mice moved while copies run go to their new player's copy straight away.
+            // Controllers, keyboards and mice moved while copies run go to their new player's copy straight away.
             let seats: Vec<Vec<String>> = self.model.seats.seats().iter().map(|s| s.as_ref().map(|s| s.devices.clone()).unwrap_or_default()).collect();
+            session::padfeed::reassign(&seats);
             for seat in session::rawkbm::reassign(&seats) {
                 crate::logfile::write("warn", &format!("player {}'s copy started without a keyboard or mouse of its own; the one given to them now works from the next start", seat + 1));
             }

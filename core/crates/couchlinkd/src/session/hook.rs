@@ -477,6 +477,50 @@ impl Child for Hooked {
     }
 }
 
+/// By hand: Shift+Tab for Steam's overlay as in a session. `CL_OVERLAY_TEST` names a folder with a game that uses the
+/// Steam API (`steam_api64.dll`, `steam_appid.txt`, the version.dll stand-in next to its exe `ovtest.exe`). Every
+/// keyboard of this PC becomes the copy's own; the copy starts in the background with Steam's overlay preloaded, and
+/// Shift+Tab on a keyboard (with another window in front) must open the overlay and bring the copy in front.
+#[cfg(test)]
+mod overlay_by_hand {
+    use super::*;
+
+    #[test]
+    #[ignore = "opens a test window for a person to press Shift+Tab in, for 2 minutes"]
+    fn shift_tab_on_a_players_keyboard_opens_steams_overlay() {
+        let dir = PathBuf::from(std::env::var("CL_OVERLAY_TEST").expect("CL_OVERLAY_TEST names the test game's folder"));
+        super::super::rawkbm::start().unwrap();
+        std::thread::sleep(Duration::from_secs(1));
+        let keyboards: Vec<String> =
+            super::super::rawkbm::devices().into_iter().filter(|d| d.kind == super::super::rawkbm::Kind::Keyboard).map(|d| d.id).collect();
+        let name = super::super::rawkbm::feed_name("overlay-test", 1);
+        let _feed = super::super::rawkbm::attach(&name, &keyboards).unwrap();
+        super::super::rawkbm::set_steam_overlay(true, super::super::window::bring_to_front, super::super::window::release_focus_now);
+        let steam = couchlink_steam::steam_root().unwrap();
+        let config = couchlink_hook::HookConfig {
+            focus: true,
+            kbm_feed: Some(name.clone()),
+            preload: vec![steam.join("GameOverlayRenderer64.dll"), steam.join("GameOverlayRenderer.dll")],
+            ..Default::default()
+        };
+        let cfg = dir.join("hook-session.json");
+        proxy::write_config(&cfg, &config).unwrap();
+        let mut child = std::process::Command::new(dir.join("ovtest.exe"))
+            .current_dir(&dir)
+            .env(proxy::CONFIG_ENV, &cfg)
+            .envs([("SteamAppId", "480"), ("SteamGameId", "480"), ("SteamOverlayGameId", "480")])
+            .spawn()
+            .unwrap();
+        super::super::rawkbm::add_pid(&name, child.id());
+        std::thread::sleep(Duration::from_secs(4));
+        super::super::window::release_focus_now();
+        eprintln!("the test window runs: click another window, then press Shift+Tab on a keyboard");
+        std::thread::sleep(Duration::from_secs(120));
+        let _ = child.kill();
+        super::super::rawkbm::set_steam_overlay(false, super::super::window::bring_to_front, super::super::window::release_focus_now);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
