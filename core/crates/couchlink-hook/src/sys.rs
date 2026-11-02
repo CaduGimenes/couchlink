@@ -297,8 +297,8 @@ struct ProcessBasicInformation {
     parent_pid: usize,
 }
 
-/// Entry point address of the exe image in the target.
-fn entry_point(l: &Launched) -> Result<usize> {
+/// Entry point address of the exe image in the target, and whether it is a .NET program.
+fn entry_point(l: &Launched) -> Result<Entry> {
     let image_base: usize = if l.x86 {
         let mut peb32 = 0usize;
         // ProcessWow64Information = 26
@@ -339,17 +339,33 @@ fn entry_point(l: &Launched) -> Result<usize> {
         return Err(HookError::Protocol("target image has no MZ header".into()));
     }
     let nt = le32(&dos, 0x3c) as usize;
-    let mut hdr = [0u8; 0x30];
+    let mut hdr = [0u8; 0x108];
     read_mem(l, image_base + nt, &mut hdr)?;
     if &hdr[0..4] != b"PE\0\0" {
         return Err(HookError::Protocol("target image has no PE header".into()));
     }
     // PE signature (4) + file header (20) = optional header; AddressOfEntryPoint is at offset 16 in both PE32 and PE32+.
     let rva = le32(&hdr, 24 + 16) as usize;
-    if rva == 0 {
+    let managed = is_managed(&hdr);
+    if rva == 0 && !managed {
         return Err(HookError::Unsupported("target exe has no entry point".into()));
     }
-    Ok(image_base + rva)
+    Ok(Entry { address: image_base + rva, managed })
+}
+
+/// Where the exe starts, and whether it is a .NET program.
+struct Entry {
+    address: usize,
+    /// A .NET program: Windows starts its runtime (mscoree's _CorExeMain) and never runs the exe's own entry point.
+    managed: bool,
+}
+
+/// True for a .NET exe: its CLR runtime header (data directory 14) is set. `nt` starts at the PE signature.
+fn is_managed(nt: &[u8]) -> bool {
+    let opt = 24;
+    let magic = u16::from_le_bytes([nt[opt], nt[opt + 1]]);
+    let clr = if magic == 0x20b { opt + 112 } else { opt + 96 } + 14 * 8;
+    clr + 4 <= nt.len() && le32(nt, clr) != 0
 }
 
 /// Current instruction pointer of the (suspended) main thread; None when it cannot be read yet.
@@ -377,7 +393,10 @@ fn thread_ip(l: &Launched) -> Option<usize> {
 
 /// Runs the main thread until it sits at the entry point, then leaves it suspended there.
 fn run_to_entry(l: &Launched) -> Result<()> {
-    let entry = entry_point(l)?;
+    let Entry { address: entry, managed } = entry_point(l)?;
+    if managed {
+        return run_to_runtime(l);
+    }
     let mut original = [0u8; 2];
     read_mem(l, entry, &mut original)?;
     let mut old = 0u32;
@@ -420,6 +439,46 @@ fn run_to_entry(l: &Launched) -> Result<()> {
         FlushInstructionCache(l.process.0, entry as *const c_void, 2);
     }
     Ok(())
+}
+
+/// A .NET program runs on until its runtime is loaded (Windows is done starting the process by then); the hook goes
+/// in while it runs, before the program has its window. Its entry point would never be reached to stop at.
+fn run_to_runtime(l: &Launched) -> Result<()> {
+    // SAFETY: valid thread handle.
+    if unsafe { ResumeThread(l.thread.0) } == u32::MAX {
+        return Err(HookError::last("ResumeThread"));
+    }
+    let deadline = Instant::now() + ENTRY_TIMEOUT;
+    let flags = if l.x86 { TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32 } else { TH32CS_SNAPMODULE };
+    loop {
+        if !l.is_running() {
+            return Err(HookError::Protocol(format!("the program exited before its .NET runtime started (code {:?})", l.exit_code())));
+        }
+        // SAFETY: plain snapshot call; a snapshot of a process still starting may fail and is tried again.
+        let snap = unsafe { CreateToolhelp32Snapshot(flags, l.pid) };
+        if snap != INVALID_HANDLE_VALUE {
+            let snap = Owned(snap);
+            // SAFETY: all-zero is valid before dwSize is set.
+            let mut me: MODULEENTRY32W = unsafe { std::mem::zeroed() };
+            me.dwSize = std::mem::size_of::<MODULEENTRY32W>() as u32;
+            // SAFETY: me is a live entry with dwSize set.
+            let mut ok = unsafe { Module32FirstW(snap.0, &mut me) };
+            while ok != 0 {
+                let len = me.szModule.iter().position(|&c| c == 0).unwrap_or(me.szModule.len());
+                let module = OsString::from_wide(&me.szModule[..len]).to_string_lossy().to_lowercase();
+                // .NET Framework 4 (clr), 2 to 3.5 (mscorwks), .NET Core and later (coreclr).
+                if matches!(module.as_str(), "clr.dll" | "mscorwks.dll" | "coreclr.dll") {
+                    return Ok(());
+                }
+                // SAFETY: as above.
+                ok = unsafe { Module32NextW(snap.0, &mut me) };
+            }
+        }
+        if Instant::now() > deadline {
+            return Err(HookError::Timeout("the program's .NET runtime did not start".into()));
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 // ---------------------------------------------------------------------------------------------- export lookup

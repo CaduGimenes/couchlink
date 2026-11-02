@@ -506,6 +506,41 @@ fn real_xinput_passthrough_hides_other_users() {
     }
 }
 
+/// A .NET program (Celeste, FNA and XNA games) never runs its exe's entry point: Windows starts its runtime instead.
+/// The hook goes in once the runtime is loaded. The program is built here with the C# compiler of .NET Framework 4,
+/// which every Windows has, for 32 and 64 bit.
+#[test]
+fn a_dotnet_program_gets_the_hook() {
+    if skip_inject() {
+        return;
+    }
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    ensure_built();
+    let windir = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into());
+    let csc = Path::new(&windir).join(r"Microsoft.NET\Framework\v4.0.30319\csc.exe");
+    if !csc.is_file() {
+        eprintln!("skipped: no .NET Framework 4 compiler");
+        return;
+    }
+    let s = Scratch::new("dotnet");
+    let src = s.path("Game.cs");
+    fs::write(&src, "class Game { static void Main() { System.Threading.Thread.Sleep(20000); } }").unwrap();
+    for platform in ["x86", "x64"] {
+        let exe = s.path(&format!("game-{platform}.exe"));
+        let out = std::process::Command::new(&csc)
+            .args(["/nologo", &format!("/platform:{platform}"), &format!("/out:{}", exe.display()), &src.display().to_string()])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "csc: {}", String::from_utf8_lossy(&out.stdout));
+        let l = launch_suspended(&exe, "", std::iter::empty::<(&str, &str)>(), Some(&s.0)).unwrap();
+        let h = inject_with(&l, &HookConfig { focus: true, ..Default::default() }, &HookOptions::default())
+            .unwrap_or_else(|e| panic!("{platform}: {e}"));
+        assert!(h.initial_status().ok, "{platform}: the hook took its config");
+        resume(&l).unwrap();
+        l.terminate();
+    }
+}
+
 /// Bad configurations are rejected with a message instead of leaving a half configured copy.
 #[test]
 fn bad_config_is_rejected() {
