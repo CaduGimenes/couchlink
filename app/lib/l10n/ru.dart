@@ -398,6 +398,7 @@ const Map<String, String> ruStrings = {
   'Use my account again': 'Снова использовать мой аккаунт',
   'Open their Steam': 'Открыть его Steam',
   'Close their Steam': 'Закрыть его Steam',
+  'Show their Steam': 'Показать его Steam',
   '{name} plays on your Steam account. Couchlink opens your Steam by itself when a game needs it.':
       '{name} играет на вашем аккаунте Steam. Couchlink сам открывает ваш Steam, когда он нужен игре.',
   'Your Steam is running.': 'Ваш Steam запущен.',

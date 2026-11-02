@@ -301,9 +301,10 @@ class _SteamAccountDialogState extends State<_SteamAccountDialog> {
             Wrap(alignment: WrapAlignment.end, spacing: 8, runSpacing: 8, children: [
               if (a != null && a.ready) ...[
                 CButton(key: const ValueKey('steam-remove'), label: t('Use my account again'), small: true, onTap: _remove),
-                if (a.running)
-                  CButton(key: const ValueKey('steam-quit'), label: t('Close their Steam'), small: true, onTap: _closeSteam)
-                else
+                if (a.running) ...[
+                  CButton(key: const ValueKey('steam-quit'), label: t('Close their Steam'), small: true, onTap: _closeSteam),
+                  CButton(key: const ValueKey('steam-show'), label: t('Show their Steam'), small: true, onTap: () => runCmd(context, () => scope.client.openSteamAccount(widget.seat))),
+                ] else
                   CButton(key: const ValueKey('steam-open'), label: t('Open their Steam'), small: true, onTap: () => runCmd(context, () => scope.client.openSteamAccount(widget.seat))),
               ],
               if (a != null && !a.ready && !_working)

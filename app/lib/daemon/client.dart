@@ -216,7 +216,7 @@ abstract class CouchClient extends ChangeNotifier {
   /// `setup_steam_account`: one Windows prompt, then that seat's Steam opens for sign-in. Replies at once.
   Future<String?> setupSteamAccount(int seat);
 
-  /// `open_steam_account`: starts that seat's own Steam.
+  /// `open_steam_account`: starts that seat's own Steam, or brings its window to the front when it runs.
   Future<String?> openSteamAccount(int seat);
 
   /// `open_owner_steam`: starts player 1's Steam (the PC owner's), to the tray.

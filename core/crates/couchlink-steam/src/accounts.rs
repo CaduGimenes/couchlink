@@ -49,6 +49,7 @@ impl AccountsConfig {
     pub fn steam_command_line(&self) -> String {
         format!("\"{}\" -master_ipc_name_override {} -userchooser", self.steam_exe.display(), self.ipc_name())
     }
+
 }
 
 /// One human-readable step for the confirmation screen.
@@ -550,7 +551,54 @@ mod imp {
     }
 
     pub fn start_steam(cfg: &AccountsConfig) -> Result<u32> {
+        // A Steam already running only gets its window shown. Starting it again does not reach it (that steam.exe
+        // waits forever), and with `-userchooser` it signed the running one out, taking its window and overlay away.
+        let running = helper_steam(cfg);
+        if running.iter().any(|(name, _)| name == "steam.exe") {
+            show_window(&running);
+            return Ok(running.iter().find(|(name, _)| name == "steam.exe").map(|(_, pid)| *pid).unwrap_or(0));
+        }
         run_steam(cfg, &cfg.steam_command_line())
+    }
+
+    /// Shows and brings to the front the main window ("Steam") of these Steam processes, also when it is closed to the
+    /// tray (Steam only hides it then).
+    fn show_window(procs: &[(String, u32)]) {
+        use windows_sys::Win32::Foundation::{HWND, LPARAM};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            EnumWindows, GetWindowTextW, GetWindowThreadProcessId, SW_RESTORE, SW_SHOW, SetForegroundWindow, ShowWindow,
+        };
+        struct Find<'a> {
+            pids: &'a [u32],
+            found: HWND,
+        }
+        unsafe extern "system" fn visit(hwnd: HWND, lparam: LPARAM) -> i32 {
+            // SAFETY: `lparam` is the `&mut Find` passed to EnumWindows below; the window handle comes from it too.
+            let f = unsafe { &mut *(lparam as *mut Find) };
+            let mut pid = 0u32;
+            unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+            if !f.pids.contains(&pid) {
+                return 1;
+            }
+            let mut buf = [0u16; 64];
+            let n = unsafe { GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
+            if String::from_utf16_lossy(&buf[..n.max(0) as usize]) == "Steam" {
+                f.found = hwnd;
+                return 0;
+            }
+            1
+        }
+        let pids: Vec<u32> = procs.iter().map(|(_, pid)| *pid).collect();
+        let mut f = Find { pids: &pids, found: null_mut() };
+        // SAFETY: the callback only reads through `lparam` while EnumWindows runs; the handle is used right after.
+        unsafe {
+            EnumWindows(Some(visit), &mut f as *mut Find as LPARAM);
+            if !f.found.is_null() {
+                ShowWindow(f.found, SW_SHOW);
+                ShowWindow(f.found, SW_RESTORE);
+                SetForegroundWindow(f.found);
+            }
+        }
     }
 
     /// Ends the seat's Steam and its helpers, by process id: only processes of the helper user are named, so the
