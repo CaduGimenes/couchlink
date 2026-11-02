@@ -233,12 +233,25 @@ class PadGeometry {
     'misc1': Offset(280, 178),
   };
 
-  /// Centre of [id] in canvas coordinates, for a family.
-  static Offset center(String id, PadStyle style) {
-    var p = pos[id]!;
-    if (style.hasTouchpad && id == 'guide') p = const Offset(280, 140);
-    return p + const Offset(ox, oy);
+  /// How far the d-pad moves on a PlayStation pad: up into the left stick's place, the stick goes down below it.
+  static const Offset _psDpad = Offset(-42, -72);
+
+  /// Centre of [id] in the 560 by 360 box, for a family: PlayStation pads have the d-pad top left and both sticks
+  /// low, Xbox-style pads the left stick top left and the d-pad low.
+  static Offset at(String id, PadStyle style) {
+    if (style.family == 'playstation') {
+      if (id == 'left_stick') return const Offset(232, 222);
+      if (id.startsWith('dpad_')) return pos[id]! + _psDpad;
+    }
+    if (style.hasTouchpad && id == 'guide') return const Offset(280, 140);
+    return pos[id]!;
   }
+
+  /// Where the d-pad is moved to for a family (zero for Xbox-style pads).
+  static Offset dpadShift(PadStyle style) => style.family == 'playstation' ? _psDpad : Offset.zero;
+
+  /// Centre of [id] in canvas coordinates, for a family.
+  static Offset center(String id, PadStyle style) => at(id, style) + const Offset(ox, oy);
 
   static const String _shell =
       'M280 78C330 78 360 72 392 74C440 77 470 100 488 150C504 196 520 258 522 290C524 330 494 346 470 340C448 335 436 318 420 296C404 274 392 258 360 256L200 256C168 258 156 274 140 296C124 318 112 335 90 340C66 346 36 330 38 290C40 258 56 196 72 150C90 100 120 77 168 74C200 72 230 78 280 78Z';
@@ -258,15 +271,15 @@ class PadGeometry {
   /// The control under [p] (canvas coordinates), or null.
   static String? hit(Offset p, PadStyle style) {
     final q = p - const Offset(ox, oy);
-    bool circle(String id, double r, [Offset? at]) => (q - (at ?? pos[id]!)).distance <= r;
+    bool circle(String id, double r, [Offset? c]) => (q - (c ?? at(id, style))).distance <= r;
     for (final id in ['north', 'south', 'west', 'east']) {
       if (circle(id, 18)) return id;
     }
     for (final id in ['dpad_up', 'dpad_down']) {
-      if (Rect.fromCenter(center: pos[id]!, width: 24, height: 30).contains(q)) return id;
+      if (Rect.fromCenter(center: at(id, style), width: 24, height: 30).contains(q)) return id;
     }
     for (final id in ['dpad_left', 'dpad_right']) {
-      if (Rect.fromCenter(center: pos[id]!, width: 30, height: 24).contains(q)) return id;
+      if (Rect.fromCenter(center: at(id, style), width: 30, height: 24).contains(q)) return id;
     }
     if (circle('left_stick', 32)) return 'left_stick';
     if (circle('right_stick', 32)) return 'right_stick';
@@ -401,7 +414,7 @@ class PadPainter extends CustomPainter {
   }
 
   void _stick(Canvas c, String id) {
-    final at = PadGeometry.pos[id]!;
+    final at = PadGeometry.at(id, style);
     c.drawCircle(at, 36, Paint()..shader = ui.Gradient.radial(at + const Offset(0, -4), 36 * 1.2, [theme.well, theme.shellBot], [.46, 1]));
     final shape = _circle(at, 26);
     _key(c, id, shape, _circle(at, 29), shadow: true);
@@ -496,12 +509,16 @@ class PadPainter extends CustomPainter {
     _stick(canvas, 'right_stick');
 
     // Cross D-pad.
+    canvas.save();
+    final shift = PadGeometry.dpadShift(style);
+    canvas.translate(shift.dx, shift.dy);
     canvas.drawCircle(const Offset(232, 222), 38, Paint()..color = theme.well.withValues(alpha: .55));
     canvas.drawRect(const Rect.fromLTWH(221, 211, 22, 22), _keyFillFor(const Rect.fromLTWH(221, 211, 22, 22)));
     _arm(canvas, 'dpad_up', const Rect.fromLTWH(221, 185, 22, 28), Path()..moveTo(232, 192)..relativeLineTo(5, 7)..relativeLineTo(-10, 0)..close());
     _arm(canvas, 'dpad_down', const Rect.fromLTWH(221, 231, 22, 28), Path()..moveTo(232, 252)..relativeLineTo(5, -7)..relativeLineTo(-10, 0)..close());
     _arm(canvas, 'dpad_left', const Rect.fromLTWH(195, 211, 28, 22), Path()..moveTo(202, 222)..relativeLineTo(7, -5)..relativeLineTo(0, 10)..close());
     _arm(canvas, 'dpad_right', const Rect.fromLTWH(241, 211, 28, 22), Path()..moveTo(262, 222)..relativeLineTo(-7, -5)..relativeLineTo(0, 10)..close());
+    canvas.restore();
 
     // Face buttons.
     for (final id in ['north', 'west', 'east', 'south']) {
@@ -527,7 +544,7 @@ class PadPainter extends CustomPainter {
             id: id,
             x: PadGeometry.center(id, style).dx,
             y: PadGeometry.center(id, style).dy,
-            left: PadGeometry.pos[id]!.dx < 280,
+            left: PadGeometry.at(id, style).dx < 280,
           ),
     ];
     for (final left in [true, false]) {
