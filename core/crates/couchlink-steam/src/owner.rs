@@ -3,12 +3,11 @@
 
 use std::path::PathBuf;
 
-/// True while the PC owner's Steam runs with an account signed in.
+/// True while the PC owner's Steam runs (it signs in by itself with the account it remembers).
 pub fn owner_steam_ready() -> bool {
-    // Steam leaves the last account in the registry when it quits: it must also still run.
     #[cfg(windows)]
     {
-        active_user().is_some_and(|u| u != 0) && owner_steam_running()
+        owner_steam_running()
     }
     #[cfg(target_os = "linux")]
     {
@@ -37,22 +36,51 @@ pub fn active_account() -> Option<u32> {
     active_user().filter(|u| *u != 0)
 }
 
-/// True while the PC owner's Steam process runs, signed in or not.
+/// True while a steam.exe of this Windows user runs, signed in or not. Found by the process list with each process's
+/// user, not by Steam's registry values: a second steam.exe that hands over to the running one clears those on its
+/// way out. A player's own Steam runs as their helper user and is not counted.
 #[cfg(windows)]
 pub fn owner_steam_running() -> bool {
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
-    let Some(pid) = active_value("pid").filter(|p| *p != 0) else { return false };
-    // SAFETY: plain calls; the handle is closed.
+    use windows_sys::Win32::Foundation::{CloseHandle, FALSE, HANDLE};
+    use windows_sys::Win32::Security::{EqualSid, GetTokenInformation, TOKEN_QUERY, TOKEN_USER, TokenUser};
+    use windows_sys::Win32::System::RemoteDesktop::{WTSEnumerateProcessesW, WTSFreeMemory, WTS_PROCESS_INFOW};
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    // SAFETY: the token is closed; the user buffer is as large as the length passed; the process list is read only up
+    // to `count` and freed.
     unsafe {
-        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if h.is_null() {
+        let mut token: HANDLE = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == FALSE {
             return false;
         }
-        let mut code = 0u32;
-        let alive = GetExitCodeProcess(h, &mut code) != 0 && code == 259; // STILL_ACTIVE
-        CloseHandle(h);
-        alive
+        let mut buf = vec![0u8; 256];
+        let mut len = 0u32;
+        let ok = GetTokenInformation(token, TokenUser, buf.as_mut_ptr().cast(), buf.len() as u32, &mut len);
+        CloseHandle(token);
+        if ok == FALSE {
+            return false;
+        }
+        let me = (*(buf.as_ptr() as *const TOKEN_USER)).User.Sid;
+        let mut list: *mut WTS_PROCESS_INFOW = std::ptr::null_mut();
+        let mut count = 0u32;
+        if WTSEnumerateProcessesW(std::ptr::null_mut(), 0, 1, &mut list, &mut count) == FALSE || list.is_null() {
+            return false;
+        }
+        let mut found = false;
+        for p in std::slice::from_raw_parts(list, count as usize) {
+            if p.pUserSid.is_null() || p.pProcessName.is_null() || EqualSid(p.pUserSid, me) == FALSE {
+                continue;
+            }
+            let mut n = 0;
+            while *p.pProcessName.add(n) != 0 {
+                n += 1;
+            }
+            if String::from_utf16_lossy(std::slice::from_raw_parts(p.pProcessName, n)).eq_ignore_ascii_case("steam.exe") {
+                found = true;
+                break;
+            }
+        }
+        WTSFreeMemory(list.cast());
+        found
     }
 }
 

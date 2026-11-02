@@ -226,6 +226,31 @@ pub fn accounts_stop_steam(cfg: &AccountsConfig) -> Result<()> {
     imp::stop_steam(cfg)
 }
 
+/// The environment of `user` made from this process's own (`ours`): the profile folders (USERPROFILE, APPDATA,
+/// LOCALAPPDATA, TEMP, ...) and the user name are that user's, under the same profiles folder, the rest is kept.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn environment_for(user: &str, ours: impl Iterator<Item = (String, String)>) -> Vec<String> {
+    let vars: Vec<(String, String)> = ours.collect();
+    let get = |k: &str| vars.iter().find(|(n, _)| n.eq_ignore_ascii_case(k)).map(|(_, v)| v.clone());
+    let profiles = get("USERPROFILE").and_then(|p| std::path::Path::new(&p).parent().map(|d| d.to_path_buf()));
+    let Some(home) = profiles.map(|d| d.join(user)) else {
+        return vars.into_iter().map(|(k, v)| format!("{k}={v}")).collect();
+    };
+    let h = |sub: &str| if sub.is_empty() { home.display().to_string() } else { home.join(sub).display().to_string() };
+    let own: [(&str, String); 7] = [
+        ("USERPROFILE", h("")),
+        ("APPDATA", h("AppData\\Roaming")),
+        ("LOCALAPPDATA", h("AppData\\Local")),
+        ("TEMP", h("AppData\\Local\\Temp")),
+        ("TMP", h("AppData\\Local\\Temp")),
+        ("USERNAME", user.to_string()),
+        ("HOMEPATH", h("").trim_start_matches(|c: char| c != '\\').to_string()),
+    ];
+    let mut out: Vec<String> = vars.into_iter().filter(|(k, _)| !own.iter().any(|(n, _)| k.eq_ignore_ascii_case(n))).map(|(k, v)| format!("{k}={v}")).collect();
+    out.extend(own.into_iter().map(|(k, v)| format!("{k}={v}")));
+    out
+}
+
 /// A process started as a seat's helper user. `process` is an owned Windows process handle (full access), the only
 /// way this Windows user can wait for or end a process of another user.
 #[derive(Debug)]
@@ -665,7 +690,9 @@ mod imp {
             let ok = CreateEnvironmentBlock(&mut block, token, FALSE);
             CloseHandle(token);
             if ok == FALSE || block.is_null() {
-                return Err(SteamError::System(format!("CreateEnvironmentBlock failed ({})", std::io::Error::last_os_error())));
+                // Once the helper user's Steam runs, its registry hive is loaded and only that user may read it, so
+                // Windows cannot build its environment for us: ours, with the profile folders made the helper's.
+                return Ok(environment_for(user, std::env::vars()));
             }
             let mut out = Vec::new();
             let mut p = block as *const u16;
@@ -764,6 +791,28 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_helper_users_environment_has_its_own_profile_folders() {
+        let ours = [
+            ("USERPROFILE", r"C:\Users\Owner"),
+            ("APPDATA", r"C:\Users\Owner\AppData\Roaming"),
+            ("TEMP", r"C:\Users\Owner\AppData\Local\Temp"),
+            ("USERNAME", "Owner"),
+            ("PATH", r"C:\Windows"),
+        ]
+        .map(|(k, v)| (k.to_string(), v.to_string()));
+        let env = environment_for("CouchlinkSeat2", ours.into_iter());
+        let has = |e: &str| env.iter().any(|x| x == e);
+        assert!(has(r"USERPROFILE=C:\Users\CouchlinkSeat2"));
+        assert!(has(r"APPDATA=C:\Users\CouchlinkSeat2\AppData\Roaming"));
+        assert!(has(r"LOCALAPPDATA=C:\Users\CouchlinkSeat2\AppData\Local"));
+        assert!(has(r"TEMP=C:\Users\CouchlinkSeat2\AppData\Local\Temp"));
+        assert!(has("USERNAME=CouchlinkSeat2"));
+        assert!(has(r"HOMEPATH=\Users\CouchlinkSeat2"));
+        assert!(has(r"PATH=C:\Windows"), "the rest stays");
+        assert!(!env.iter().any(|x| x.contains("Owner")), "nothing of the owner's profile is left");
+    }
 
     /// On a PC where seat 2 has its own Steam set up: starts that Steam, then closes it the way the app does.
     #[test]

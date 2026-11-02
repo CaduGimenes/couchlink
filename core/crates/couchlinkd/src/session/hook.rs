@@ -521,6 +521,40 @@ mod overlay_by_hand {
     }
 }
 
+/// By hand: a copy whose player has no controller, with Steam's overlay preloaded, must see no controller at all, even
+/// with Steam Input on. `CL_PAD_TEST` names the folder of `ovtest3.exe` (a Steam API program that logs every XInput
+/// change to ovtest.log, with the version.dll stand-in next to it); press buttons on a controller while it runs.
+#[cfg(test)]
+mod pads_by_hand {
+    use super::*;
+
+    #[test]
+    #[ignore = "opens a test window for a person to press controller buttons in, for 90 seconds"]
+    fn a_copy_without_a_controller_sees_none_with_steams_overlay() {
+        let dir = PathBuf::from(std::env::var("CL_PAD_TEST").expect("CL_PAD_TEST names the test game's folder"));
+        let name = super::super::padfeed::feed_name(format!("pad-test-{}", std::process::id()), 1);
+        let _feed = super::super::padfeed::attach_for_seat(&name, &[], Some(1), None, None).unwrap();
+        let steam = couchlink_steam::steam_root().unwrap();
+        let config = couchlink_hook::HookConfig {
+            focus: true,
+            feed: Some(name.clone()),
+            own_pads: Some(Vec::new()),
+            preload: vec![steam.join("GameOverlayRenderer64.dll"), steam.join("GameOverlayRenderer.dll")],
+            ..Default::default()
+        };
+        let cfg = dir.join("hook-pads.json");
+        proxy::write_config(&cfg, &config).unwrap();
+        let mut child = std::process::Command::new(dir.join("ovtest3.exe"))
+            .current_dir(&dir)
+            .env(proxy::CONFIG_ENV, &cfg)
+            .envs([("SteamAppId", "480"), ("SteamGameId", "480"), ("SteamOverlayGameId", "480")])
+            .spawn()
+            .unwrap();
+        eprintln!("the test window runs: press buttons on a controller");
+        let _ = child.wait();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
