@@ -23,6 +23,7 @@ class Device {
     required this.connection,
     this.battery,
     this.charging = false,
+    this.canTurnOff = false,
     this.seat,
   });
 
@@ -35,6 +36,9 @@ class Device {
 
   /// Plugged in and charging; [battery] still holds the level.
   final bool charging;
+
+  /// Couchlink can turn this controller off (`disconnect_device`): wireless, and the system supports it.
+  final bool canTurnOff;
   final int? seat;
 
   bool get isKbm => kind == 'kbm' || family == 'kbm';
@@ -51,6 +55,7 @@ class Device {
         connection: _str(j['connection'], 'unknown'),
         battery: j['battery'] is num ? (j['battery'] as num).round() : null,
         charging: j['charging'] == true,
+        canTurnOff: j['can_turn_off'] == true,
         seat: j['seat'] is num ? (j['seat'] as num).toInt() : null,
       );
 }
@@ -245,6 +250,7 @@ class DaemonState {
     this.fpsLimit = 0,
     this.stopKeys = 'Ctrl+Shift+Q',
     this.stopPad = 'guide+back',
+    this.turnOffPad = 'off',
     this.frontKeys = 'Ctrl+Shift+F',
     this.hideKeys = 'Ctrl+Shift+H',
     this.hostControl = true,
@@ -271,6 +277,9 @@ class DaemonState {
   /// The close-the-games shortcut: keys like `Ctrl+Shift+Q` and pad buttons like `guide+back`, each `off` when off.
   final String stopKeys;
   final String stopPad;
+
+  /// Pad buttons held for 2 seconds turn that controller off (`set_turn_off_pad`); `off` when off.
+  final String turnOffPad;
 
   /// The keys that bring the game windows to the front, and hide them; `off` when off.
   final String frontKeys;
@@ -335,6 +344,7 @@ class DaemonState {
       fpsLimit: j['fps_limit'] is num ? (j['fps_limit'] as num).toInt() : 0,
       stopKeys: _str(j['stop_keys'], 'Ctrl+Shift+Q'),
       stopPad: _str(j['stop_pad'], 'guide+back'),
+      turnOffPad: _str(j['turn_off_pad'], 'off'),
       frontKeys: _str(j['front_keys'], 'Ctrl+Shift+F'),
       hideKeys: _str(j['hide_keys'], 'Ctrl+Shift+H'),
       hostControl: j['host_control'] != false,

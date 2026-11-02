@@ -727,6 +727,26 @@ class _BindingsTab extends StatelessWidget {
           ]),
           const SizedBox(height: 6),
           Text(t('Guide is the Xbox or PS button. Back is View, Select or Create.'), style: txt(context, size: 11, color: c.ink3, height: 1.35)),
+          const SizedBox(height: 12),
+          Text(t('Turn off a controller (hold both for 2 seconds)'), style: txt(context, size: 12, weight: FontWeight.w600, color: c.ink2)),
+          const SizedBox(height: 6),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            for (final (v, l) in _pads)
+              CChip(
+                key: ValueKey('turn-off-pad-$v'),
+                label: l,
+                selected: st.turnOffPad == v,
+                onTap: () async {
+                  final err = await client.setTurnOffPad(v);
+                  if (err != null) scope.toaster.show(err, long: true);
+                },
+              ),
+          ]),
+          const SizedBox(height: 6),
+          Text(
+            t('The controller you hold them on turns off, as holding its Home button does. Wireless controllers only, and not the buttons that close the games.'),
+            style: txt(context, size: 11, color: c.ink3, height: 1.35),
+          ),
         ]);
       },
     );

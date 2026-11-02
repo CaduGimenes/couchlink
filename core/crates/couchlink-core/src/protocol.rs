@@ -65,6 +65,14 @@ pub enum Command {
     Identify {
         seat: usize,
     },
+    /// Turns a wireless controller off (Bluetooth disconnect, or the Xbox adapter's power off); `device` is `pad:<n>`.
+    DisconnectDevice {
+        device: String,
+    },
+    /// The pad buttons that turn a controller off when held for 2 seconds (`guide+start`, ..., or `off`).
+    SetTurnOffPad {
+        pad: String,
+    },
     SetLayout {
         layout: Layout,
     },
@@ -460,6 +468,8 @@ mod tests {
             Command::Rename { seat: 0, name: "Mum".into() }
         );
         assert_eq!(parse(json!({"id": 8, "cmd": "identify", "seat": 0})).cmd, Command::Identify { seat: 0 });
+        assert_eq!(parse(json!({"id": 8, "cmd": "disconnect_device", "device": "pad:3"})).cmd, Command::DisconnectDevice { device: "pad:3".into() });
+        assert_eq!(parse(json!({"id": 8, "cmd": "set_turn_off_pad", "pad": "guide+start"})).cmd, Command::SetTurnOffPad { pad: "guide+start".into() });
         for (s, l) in [
             ("auto", Layout::Auto),
             ("lr", Layout::Lr),
@@ -610,7 +620,7 @@ mod tests {
         let s = &v["state"];
         let mut keys: Vec<_> = s.as_object().unwrap().keys().cloned().collect();
         keys.sort();
-        assert_eq!(keys, ["control_keys", "dev", "devices", "displays", "fps_limit", "front_keys", "hide_keys", "host_control", "layout", "only_in_front", "screens", "seats", "show_cursors", "stop_keys", "stop_pad"]);
+        assert_eq!(keys, ["control_keys", "dev", "devices", "displays", "fps_limit", "front_keys", "hide_keys", "host_control", "layout", "only_in_front", "screens", "seats", "show_cursors", "stop_keys", "stop_pad", "turn_off_pad"]);
         assert_eq!(s["layout"], "auto");
         assert_eq!(s["fps_limit"], 0);
         assert_eq!(s["dev"], false);
@@ -619,7 +629,7 @@ mod tests {
         assert_eq!(
             kbm,
             &json!({"id": "kbm:system", "kind": "kbm", "name": "Keyboard and mouse", "family": "kbm",
-                    "connection": "usb", "battery": null, "charging": false, "seat": null})
+                    "connection": "usb", "battery": null, "charging": false, "can_turn_off": false, "seat": null})
         );
     }
 
@@ -628,9 +638,9 @@ mod tests {
         let text = r##"{
           "devices": [
             {"id": "pad:7", "kind": "gamepad", "name": "Xbox Wireless Controller", "family": "xbox",
-             "connection": "wireless", "battery": 80, "charging": true, "seat": 0},
+             "connection": "wireless", "battery": 80, "charging": true, "can_turn_off": true, "seat": 0},
             {"id": "kbm:system", "kind": "kbm", "name": "Keyboard and mouse", "family": "kbm",
-             "connection": "usb", "battery": null, "charging": false, "seat": null}
+             "connection": "usb", "battery": null, "charging": false, "can_turn_off": false, "seat": null}
           ],
           "seats": [{"name": "Player 1", "color": "#0A84FF", "devices": ["pad:7"], "profile": {"id": "default", "name": "Default"}}, null, null, null],
           "displays": [{"id": "disp:1", "name": "DELL U2720Q", "x": 0, "y": 0, "w": 2560, "h": 1440,
@@ -640,6 +650,7 @@ mod tests {
           "fps_limit": 30,
           "stop_keys": "Ctrl+Alt+End",
           "stop_pad": "back+start",
+          "turn_off_pad": "guide+start",
           "front_keys": "Ctrl+Shift+F",
           "hide_keys": "off",
           "host_control": false,

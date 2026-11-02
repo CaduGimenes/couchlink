@@ -11,6 +11,7 @@ mod layouts;
 mod update;
 mod logfile;
 mod play;
+mod poweroff;
 mod profiles;
 mod sdl;
 mod session;

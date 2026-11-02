@@ -39,6 +39,9 @@ pub struct Device {
     /// True while the pad is plugged in and charging (battery still reports the level).
     #[serde(default)]
     pub charging: bool,
+    /// True when Couchlink can turn this controller off (`disconnect_device`): wireless, and the platform supports it.
+    #[serde(default)]
+    pub can_turn_off: bool,
     pub seat: Option<u8>,
 }
 
@@ -107,6 +110,9 @@ pub struct State {
     pub stop_keys: String,
     #[serde(default = "default_stop_pad")]
     pub stop_pad: String,
+    /// Pad buttons held for 2 seconds turn that controller off (`set_turn_off_pad`), `off` when off.
+    #[serde(default = "default_turn_off_pad")]
+    pub turn_off_pad: String,
     /// The keys that bring the game windows to the front, and hide them (`set_window_keys`), each `off` when off.
     #[serde(default = "default_front_keys")]
     pub front_keys: String,
@@ -149,4 +155,8 @@ fn default_stop_keys() -> String {
 
 fn default_stop_pad() -> String {
     crate::shortcut::DEFAULT_PAD.to_string()
+}
+
+fn default_turn_off_pad() -> String {
+    crate::shortcut::DEFAULT_TURN_OFF_PAD.to_string()
 }

@@ -16,6 +16,7 @@ pub struct Model {
     fps_limit: u32,
     stop_keys: String,
     stop_pad: String,
+    turn_off_pad: String,
     front_keys: String,
     hide_keys: String,
     host_control: bool,
@@ -42,9 +43,10 @@ impl Model {
             connection: Connection::Usb,
             battery: None,
             charging: false,
+            can_turn_off: false,
             seat: None,
         });
-        Model { seats, displays: Vec::new(), used_overrides: HashMap::new(), layout: Layout::Auto, screens: Vec::new(), fps_limit: 0, stop_keys: crate::shortcut::DEFAULT_KEYS.to_string(), stop_pad: crate::shortcut::DEFAULT_PAD.to_string(), front_keys: crate::shortcut::DEFAULT_FRONT_KEYS.to_string(), hide_keys: crate::shortcut::DEFAULT_HIDE_KEYS.to_string(), host_control: true, control_keys: crate::shortcut::DEFAULT_CONTROL_KEYS.to_string(), show_cursors: true, only_in_front: true, dev }
+        Model { seats, displays: Vec::new(), used_overrides: HashMap::new(), layout: Layout::Auto, screens: Vec::new(), fps_limit: 0, stop_keys: crate::shortcut::DEFAULT_KEYS.to_string(), stop_pad: crate::shortcut::DEFAULT_PAD.to_string(), turn_off_pad: crate::shortcut::DEFAULT_TURN_OFF_PAD.to_string(), front_keys: crate::shortcut::DEFAULT_FRONT_KEYS.to_string(), hide_keys: crate::shortcut::DEFAULT_HIDE_KEYS.to_string(), host_control: true, control_keys: crate::shortcut::DEFAULT_CONTROL_KEYS.to_string(), show_cursors: true, only_in_front: true, dev }
     }
 
     pub fn dev(&self) -> bool {
@@ -82,6 +84,9 @@ impl Model {
         };
         if let Some(p) = pad {
             crate::shortcut::pad_buttons(p)?;
+            if p != "off" && p == self.turn_off_pad {
+                return Err(format!("{p} already turns a controller off; pick other buttons for closing the games"));
+            }
         }
         let before = (self.stop_keys.clone(), self.stop_pad.clone());
         if let Some(k) = keys {
@@ -91,6 +96,22 @@ impl Model {
             self.stop_pad = p.to_string();
         }
         Ok(before != (self.stop_keys.clone(), self.stop_pad.clone()))
+    }
+
+    /// The pad buttons that turn a controller off when held (`guide+start`, or `off`). They may not be the buttons that
+    /// close the games. True when it changed.
+    pub fn set_turn_off_pad(&mut self, pad: &str) -> Result<bool, String> {
+        crate::shortcut::pad_buttons(pad)?;
+        if pad != "off" && pad == self.stop_pad {
+            return Err(format!("{pad} already closes the games; pick other buttons for turning a controller off"));
+        }
+        let changed = self.turn_off_pad != pad;
+        self.turn_off_pad = pad.to_string();
+        Ok(changed)
+    }
+
+    pub fn turn_off_pad(&self) -> &str {
+        &self.turn_off_pad
     }
 
     /// The keys that bring the game windows to the front and hide them (`Ctrl+Shift+F`, or `off`). True when either changed.
@@ -244,6 +265,7 @@ impl Model {
             fps_limit: self.fps_limit,
             stop_keys: self.stop_keys.clone(),
             stop_pad: self.stop_pad.clone(),
+            turn_off_pad: self.turn_off_pad.clone(),
             front_keys: self.front_keys.clone(),
             hide_keys: self.hide_keys.clone(),
             host_control: self.host_control,
@@ -339,5 +361,25 @@ mod tests {
         assert!(!m.set_layout(Layout::Auto));
         assert!(m.set_layout(Layout::Grid));
         assert_eq!(m.state().layout, Layout::Grid);
+    }
+
+    #[test]
+    fn the_turn_off_buttons_start_off_and_may_not_equal_the_close_buttons() {
+        let mut m = Model::new(false);
+        assert_eq!(m.turn_off_pad(), "off");
+        assert_eq!(m.state().turn_off_pad, "off");
+        assert!(m.set_turn_off_pad("guide+start").unwrap());
+        assert!(!m.set_turn_off_pad("guide+start").unwrap());
+        // The close-the-games buttons default to guide+back: the turn-off buttons cannot take them.
+        assert!(m.set_turn_off_pad("guide+back").unwrap_err().contains("closes the games"));
+        assert!(m.set_turn_off_pad("a+b").is_err());
+        assert_eq!(m.turn_off_pad(), "guide+start");
+        // And the other way round.
+        assert!(m.set_stop_shortcut(None, Some("guide+start")).unwrap_err().contains("turns a controller off"));
+        assert_eq!(m.stop_pad(), "guide+back");
+        // `off` never conflicts, on either side.
+        assert!(m.set_stop_shortcut(None, Some("off")).unwrap());
+        assert!(m.set_turn_off_pad("off").unwrap());
+        assert!(!m.set_stop_shortcut(None, Some("off")).unwrap());
     }
 }

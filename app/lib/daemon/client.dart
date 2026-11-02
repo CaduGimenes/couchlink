@@ -99,6 +99,12 @@ abstract class CouchClient extends ChangeNotifier {
   Future<String?> setStopShortcut({String? keys, String? pad});
   Future<String?> setDisplayUsed(String display, bool used);
 
+  /// Turn a wireless controller off (`disconnect_device`); [device] is its id. Null on success, else the error.
+  Future<String?> disconnectDevice(String device);
+
+  /// The pad buttons that turn a controller off when held (`set_turn_off_pad`), or `off`. Null on success, else the error.
+  Future<String?> setTurnOffPad(String pad);
+
   /// Replace every screen's arrangement at once (who plays on which display, and where).
   Future<String?> setScreens(List<ScreenArrangement> screens);
   Future<void> subscribeInput(bool on);

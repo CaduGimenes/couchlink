@@ -184,7 +184,7 @@ class _DeviceChip extends StatelessWidget {
   final int? seat;
   final Animation<double> breath;
 
-  Widget _body(BuildContext context, {bool hover = false}) {
+  Widget _body(BuildContext context, {bool hover = false, bool power = false}) {
     final c = context.c;
     final seated = seat != null;
     final kind = device.isKeyboard ? t('Keyboard') : device.isMouse ? t('Mouse') : null;
@@ -229,6 +229,10 @@ class _DeviceChip extends StatelessWidget {
               ],
             ),
           ),
+          if (power && device.canTurnOff) ...[
+            const SizedBox(width: 8),
+            _TurnOffButton(device: device),
+          ],
         ],
       ),
     );
@@ -249,7 +253,7 @@ class _DeviceChip extends StatelessWidget {
           scope.toaster.show(t('Press A on this controller to take a seat'));
         }
       },
-      builder: (context, s) => Opacity(opacity: seated ? .45 : 1, child: _body(context, hover: s.hover)),
+      builder: (context, s) => Opacity(opacity: seated ? .45 : 1, child: _body(context, hover: s.hover, power: true)),
     );
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 300),
@@ -265,6 +269,35 @@ class _DeviceChip extends StatelessWidget {
         ),
         childWhenDragging: Opacity(opacity: .35, child: _body(context)),
         child: chip,
+      ),
+    );
+  }
+}
+
+/// Turns a wireless controller off, as holding its Home button does.
+class _TurnOffButton extends StatelessWidget {
+  const _TurnOffButton({required this.device});
+
+  final Device device;
+
+  @override
+  Widget build(BuildContext context) {
+    final scope = Scope.of(context);
+    return Tooltip(
+      message: t('Turn off'),
+      waitDuration: const Duration(milliseconds: 400),
+      child: Pressable(
+        key: ValueKey('turn-off-${device.id}'),
+        radius: 8,
+        semanticLabel: t('Turn off'),
+        onTap: () => runCmd(context, () => scope.client.disconnectDevice(device.id)),
+        builder: (context, s) => Container(
+          width: 26,
+          height: 26,
+          decoration: BoxDecoration(color: s.hover ? context.c.hairStrong : null, borderRadius: BorderRadius.circular(8)),
+          alignment: Alignment.center,
+          child: CIcon(iconPower, size: 15, color: context.c.ink2, strokeWidth: 1.8),
+        ),
       ),
     );
   }
