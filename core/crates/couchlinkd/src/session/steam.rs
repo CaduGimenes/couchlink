@@ -110,6 +110,27 @@ fn steam_appid_file(ctx: &PrepareCtx, journal: &mut Journal) -> Result<(), Strin
     Ok(())
 }
 
+/// Seat 1 plays on the Steam of the person at the PC: started (to the tray) when it is not running with someone signed
+/// in, and waited for, so a game that needs Steam does not start without it.
+fn owner_steam(ctx: &PrepareCtx) -> Result<(), String> {
+    // Without Steam installed there is nothing to start; the game says what it misses.
+    if !cfg!(windows) || couchlink_steam::steam_root().is_none() || couchlink_steam::owner::owner_steam_ready() {
+        return Ok(());
+    }
+    crate::logfile::write("info", &format!("{} needs Steam: starting yours", ctx.recipe.game));
+    couchlink_steam::owner::start_owner_steam().map_err(|e| format!("{} needs Steam, which could not be started: {e}", ctx.recipe.game))?;
+    let start = std::time::Instant::now();
+    while !couchlink_steam::owner::owner_steam_ready() {
+        if start.elapsed() >= OWN_STEAM_WAIT {
+            return Err(format!("{} needs Steam: open Steam and sign in, then start again", ctx.recipe.game));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    // Steam takes a moment after signing in before games can talk to it.
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    Ok(())
+}
+
 /// How long a seat's own Steam gets to start before its game copy is launched.
 const OWN_STEAM_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
 
@@ -119,6 +140,7 @@ const OWN_STEAM_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
 fn own_account(ctx: &PrepareCtx) -> Result<SeatPrep, String> {
     let seat = ctx.seat.seat as u8;
     if seat == 0 {
+        owner_steam(ctx)?;
         return Ok(SeatPrep::default());
     }
     let cfg = couchlink_steam::seat_config(seat).filter(couchlink_steam::accounts_ready);

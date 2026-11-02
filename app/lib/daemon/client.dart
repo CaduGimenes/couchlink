@@ -169,6 +169,17 @@ abstract class CouchClient extends ChangeNotifier {
   /// the recipe says. The game list is asked for again. Returns null or an error text.
   Future<String?> setGameOverlay(String recipe, bool? on);
 
+  /// `set_game_steam`: whether a game needs Steam (`needed`, `not_needed`), null for automatic. The game list is asked
+  /// for again. Returns null or an error text.
+  Future<String?> setGameSteam(String recipe, String? choice);
+
+  /// `create_shortcut`: a desktop shortcut that starts the game through Couchlink. Its path, or an error text.
+  Future<({String? path, String? error})> createShortcut(String recipe);
+
+  /// `add_to_steam`: adds the game to Steam as a non-Steam game (Steam closes and opens again; the outcome is a log
+  /// event). Returns null or an error text.
+  Future<String?> addToSteam(String recipe);
+
   /// `get_log`: the log folder and the end of the logs (Couchlink's own and each game copy's), for "Copy log"
   /// and "Open log folder" after an error. [error] is set when the service could not be asked.
   Future<({String text, String dir, String? error})> getLog();

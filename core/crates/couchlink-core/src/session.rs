@@ -91,6 +91,10 @@ pub struct GameInfo {
     /// The game has an overlay Couchlink can bring: Goldberg's, or Steam's own for a game on real Steam (Windows).
     #[serde(default)]
     pub has_overlay: bool,
+    /// The player's Steam choice for the game (`set_game_steam`): `needed` or `not_needed`; none: automatic. `steam`
+    /// already says what a start would use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steam_choice: Option<String>,
     /// How to play (the recipe's `tips`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tips: Vec<String>,

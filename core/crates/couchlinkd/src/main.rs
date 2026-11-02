@@ -6,9 +6,11 @@ mod crash;
 mod displays;
 mod hotkey;
 mod hub;
+mod launchers;
 mod layouts;
 mod update;
 mod logfile;
+mod play;
 mod profiles;
 mod sdl;
 mod session;
@@ -166,6 +168,10 @@ fn main() {
     }
     // The elevated half of the display driver setup for virtual screens (see vscreen_setup.rs).
     if let Some(code) = vscreen_setup::cli(&all) {
+        std::process::exit(code);
+    }
+    // A launcher's start: asks the daemon for a game's session (see play.rs).
+    if let Some(code) = play::cli(&all) {
         std::process::exit(code);
     }
     let args = match parse_args() {

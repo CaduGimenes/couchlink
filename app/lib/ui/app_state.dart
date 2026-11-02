@@ -10,7 +10,7 @@ import '../l10n/l10n.dart';
 import 'catalog_logic.dart';
 import 'profile_files.dart';
 
-enum AppView { library, players, screens, discover, recipe, dev }
+enum AppView { library, players, screens, launchers, discover, recipe, dev }
 
 /// UI-only state: where you are, local settings, the picked game.
 class UiState extends ChangeNotifier {
@@ -47,6 +47,23 @@ class UiState extends ChangeNotifier {
     controlsSeat = null;
     view = v;
     sheetGameId = null;
+    notifyListeners();
+  }
+
+  /// The game picked on the Start from other apps page; empty until one is picked (the Library's game then counts).
+  String launchersGame = '';
+
+  /// Opens Start from other apps on [recipe] (from a game's sheet).
+  void openLaunchers(String recipe) {
+    launchersGame = recipe;
+    controlsSeat = null;
+    sheetGameId = null;
+    view = AppView.launchers;
+    notifyListeners();
+  }
+
+  void pickLaunchersGame(String recipe) {
+    launchersGame = recipe;
     notifyListeners();
   }
 

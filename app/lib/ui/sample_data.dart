@@ -34,6 +34,8 @@ class LibraryGame {
     this.setup = const [],
     this.controls = false,
     this.overlay,
+    this.steam,
+    this.steamChoice,
     this.tips = const [],
     this.installs = const [],
   });
@@ -67,6 +69,11 @@ class LibraryGame {
   /// The in-game overlay (Shift+Tab) at the next start; null for a game that has none to give (no Steam).
   final bool? overlay;
 
+  /// How a start uses Steam (none, shared, goldberg, accounts) and the player's choice (needed, not_needed, or null for
+  /// automatic); null for a game couchlinkd did not list.
+  final String? steam;
+  final String? steamChoice;
+
   /// How to play, and what Couchlink installs for the game.
   final List<String> tips;
   final List<InstallInfo> installs;
@@ -77,7 +84,7 @@ class LibraryGame {
   /// The recipe id (the library id of a game is its recipe).
   String get recipe => id;
 
-  LibraryGame copyWith({String? name, bool? installed, int? minPlayers, int? maxPlayers, int? steamAppId, List<SetupStep>? setup, bool? controls, bool? overlay, List<String>? tips, List<InstallInfo>? installs}) => LibraryGame(
+  LibraryGame copyWith({String? name, bool? installed, int? minPlayers, int? maxPlayers, int? steamAppId, List<SetupStep>? setup, bool? controls, bool? overlay, String? steam, String? steamChoice, List<String>? tips, List<InstallInfo>? installs}) => LibraryGame(
         id: id,
         name: name ?? this.name,
         tier: tier,
@@ -94,6 +101,8 @@ class LibraryGame {
         setup: setup ?? this.setup,
         controls: controls ?? this.controls,
         overlay: overlay ?? this.overlay,
+        steam: steam ?? this.steam,
+        steamChoice: steamChoice ?? this.steamChoice,
         tips: tips ?? this.tips,
         installs: installs ?? this.installs,
       );
@@ -238,7 +247,7 @@ String _steamText(String steam) => switch (steam) {
 LibraryGame libraryGameOf(GameInfo g) {
   for (final s in sampleGames) {
     if (s.id == g.recipe) {
-      return s.copyWith(name: g.game, installed: g.installed, minPlayers: g.minPlayers, maxPlayers: g.maxPlayers, steamAppId: g.steamAppId, setup: g.setup, controls: g.controls, overlay: g.hasOverlay ? g.overlay : null, tips: g.tips, installs: g.installs);
+      return s.copyWith(name: g.game, installed: g.installed, minPlayers: g.minPlayers, maxPlayers: g.maxPlayers, steamAppId: g.steamAppId, setup: g.setup, controls: g.controls, overlay: g.hasOverlay ? g.overlay : null, steam: g.steam, steamChoice: g.steamChoice, tips: g.tips, installs: g.installs);
     }
   }
   var h = 0;
@@ -263,6 +272,8 @@ LibraryGame libraryGameOf(GameInfo g) {
     setup: g.setup,
     controls: g.controls,
     overlay: g.hasOverlay ? g.overlay : null,
+    steam: g.steam,
+    steamChoice: g.steamChoice,
     tips: g.tips,
     installs: g.installs,
   );

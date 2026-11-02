@@ -105,6 +105,8 @@ pub enum HubMsg {
     SteamAccountDone { seat: usize, step: &'static str, result: Result<(), String> },
     /// The display driver setup for virtual screens finished (`vscreen_setup.rs`).
     VirtualScreensDone(Result<(), String>),
+    /// Work done off the hub task (adding a game to Steam): what to tell the player.
+    Note(LogLevel, String),
 }
 
 struct Client {
@@ -394,6 +396,7 @@ impl Hub {
                     }
                     self.broadcast(&Event::GamesChanged);
                 }
+                HubMsg::Note(level, text) => self.log(level, text),
             }
         }
         self.sdl
@@ -792,6 +795,18 @@ impl Hub {
                 });
                 Ok(json!({ "started": true }))
             }
+            Command::SetGameSteam { recipe, choice } => {
+                self.session.set_game_steam(&recipe, choice.as_deref())?;
+                self.broadcast(&Event::GamesChanged);
+                Ok(none)
+            }
+            Command::Play { recipe, exe } => {
+                let id = self.session.find_game(recipe.as_deref(), exe.as_deref())?;
+                self.log(LogLevel::Info, format!("a launcher starts {id}"));
+                self.start_session(&id, &Default::default(), false)
+            }
+            Command::CreateShortcut { recipe } => self.create_shortcut(&recipe),
+            Command::AddToSteam { recipe } => self.add_to_steam(&recipe),
             Command::OpenSteamAccount { seat } => crate::accounts::open(seat).map(|_| none),
             Command::SetupSteamAccount { seat } => self.steam_account_step("setup", seat),
             Command::RemoveSteamAccount { seat } => self.steam_account_step("remove", seat),
@@ -851,6 +866,47 @@ impl Hub {
 
     fn layouts_reply(&self) -> serde_json::Value {
         json!({ "layouts": self.layouts.layouts, "pins": self.layouts.pins })
+    }
+
+    /// The game's name and its own program (for a shortcut's icon), from the game list.
+    fn game_for_shortcut(&self, recipe: &str) -> Result<(String, Option<std::path::PathBuf>), String> {
+        let (games, _) = self.session.list_games();
+        let g = games.into_iter().find(|g| g.recipe == recipe).ok_or_else(|| format!("no game {recipe}"))?;
+        Ok((g.game, self.session.game_program(recipe)))
+    }
+
+    /// `create_shortcut`: a desktop shortcut that starts the game through Couchlink. Replies with its path.
+    #[cfg(windows)]
+    fn create_shortcut(&mut self, recipe: &str) -> Result<serde_json::Value, String> {
+        let (game, icon) = self.game_for_shortcut(recipe)?;
+        let path = crate::launchers::create_shortcut(&crate::launchers::desktop()?, &game, recipe, icon.as_deref())?;
+        Ok(json!({ "path": path }))
+    }
+
+    #[cfg(not(windows))]
+    fn create_shortcut(&mut self, _: &str) -> Result<serde_json::Value, String> {
+        Err("desktop shortcuts are made on Windows only for now; use the launch command".to_string())
+    }
+
+    /// `add_to_steam`: replies at once; Steam closes, gets the game and opens again, and the outcome is a `log` event.
+    #[cfg(windows)]
+    fn add_to_steam(&mut self, recipe: &str) -> Result<serde_json::Value, String> {
+        let (game, icon) = self.game_for_shortcut(recipe)?;
+        let recipe = recipe.to_string();
+        let tx = self.self_tx.clone();
+        std::thread::spawn(move || {
+            let note = match crate::launchers::add_to_steam(&game, &recipe, icon.as_deref()) {
+                Ok(()) => (LogLevel::Info, format!("{game} (Couchlink) is in your Steam library")),
+                Err(e) => (LogLevel::Warn, format!("Adding {game} to Steam: {e}")),
+            };
+            let _ = tx.send(HubMsg::Note(note.0, note.1));
+        });
+        Ok(json!({ "started": true }))
+    }
+
+    #[cfg(not(windows))]
+    fn add_to_steam(&mut self, _: &str) -> Result<serde_json::Value, String> {
+        Err("adding to Steam is done on Windows only for now; add it by hand with the launch command".to_string())
     }
 
     fn start_session(&mut self, recipe: &str, options: &std::collections::BTreeMap<String, String>, plain: bool) -> Result<serde_json::Value, String> {

@@ -406,6 +406,7 @@ class _GameSheetState extends State<GameSheet> {
                                 ),
                                 if (g.tier == Tier.tryIt && g.installed) _ProgramPicker(key: ValueKey('program-${g.id}'), recipe: g.id),
                                 if (g.overlay != null) _GameSettings(key: ValueKey('settings-${g.id}'), recipe: g.id, overlay: g.overlay!),
+                                if (g.installed && g.steam != null) _SteamChoice(key: ValueKey('steam-choice-${g.id}'), game: g),
                                 if (g.installed) GameLayoutPin(key: ValueKey('layout-pin-${g.id}'), recipe: g.id, game: g.name),
                                 if (g.setup.isNotEmpty) ...[
                                   const SizedBox(height: 18),
@@ -517,6 +518,59 @@ class _GameSheetState extends State<GameSheet> {
           ]);
         });
       },
+    );
+  }
+}
+
+/// Whether a game needs Steam, in its sheet: automatic, needed (Couchlink opens your Steam and every player's own
+/// before the copies start) or not needed; and the way to start it from Steam or a launcher.
+class _SteamChoice extends StatelessWidget {
+  const _SteamChoice({super.key, required this.game});
+
+  final LibraryGame game;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final scope = Scope.of(context);
+    // Goldberg and every-player-on-their-own-account games keep how their recipe uses Steam.
+    final fixed = game.steam == 'goldberg' || game.steam == 'accounts';
+    final choice = game.steamChoice ?? 'auto';
+    final needs = game.steam == 'shared' || game.steam == 'accounts';
+    final text = switch (choice) {
+      'needed' => t('When a session starts, Couchlink opens your Steam and the Steam of every player with their own account, and waits until they are signed in.'),
+      'not_needed' => t('Steam stays out of it: no Steam is opened and every copy runs as it is.'),
+      _ => needs
+          ? t('Couchlink found this is a Steam game, so it opens your Steam and every player’s own when a session starts.')
+          : t('Couchlink found no Steam in this game. Pick Needed if it only runs with Steam.'),
+    };
+    return Padding(
+      padding: const EdgeInsets.only(top: 18),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(t('Steam'), key: const ValueKey('sheet-steam'), style: txt(context, size: 13, weight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        if (!fixed) ...[
+          Seg<String>(
+            keyPrefix: 'steam-choice',
+            options: const [('auto', 'Automatic'), ('needed', 'Needed'), ('not_needed', 'Not needed')],
+            value: choice,
+            onChanged: (v) async {
+              final err = await scope.client.setGameSteam(game.recipe, v == 'auto' ? null : v);
+              if (err != null) scope.toaster.show(err, error: true);
+            },
+          ),
+          const SizedBox(height: 6),
+          Text(text, style: txt(context, size: 12, color: c.ink3, height: 1.35)),
+          const SizedBox(height: 10),
+        ],
+        CButton(
+          key: const ValueKey('sheet-launchers'),
+          label: t('Start from other apps'),
+          small: true,
+          leading: CIcon(iconExternal, size: 13, color: c.ink, strokeWidth: 1.8),
+          onTap: () => scope.ui.openLaunchers(game.recipe),
+        ),
+      ]),
     );
   }
 }

@@ -198,6 +198,29 @@ pub enum Command {
     OpenSteamAccount {
         seat: usize,
     },
+    /// Whether a game needs Steam: `needed`, `not_needed`, or null for automatic.
+    SetGameSteam {
+        recipe: String,
+        #[serde(default)]
+        choice: Option<String>,
+    },
+    /// A launcher's start (`couchlinkd --play`): the game by recipe id or name, or by a program inside its folder,
+    /// started with the current players and screens.
+    Play {
+        #[serde(default)]
+        recipe: Option<String>,
+        #[serde(default)]
+        exe: Option<String>,
+    },
+    /// Put a shortcut on the desktop that starts the game through Couchlink (`couchlink.exe --play <recipe>`).
+    CreateShortcut {
+        recipe: String,
+    },
+    /// Add the game to Steam as a non-Steam game that starts it through Couchlink. Steam is closed and opened again,
+    /// as it reads its shortcuts only when it starts.
+    AddToSteam {
+        recipe: String,
+    },
     /// Closes that seat's own Steam, as its Exit menu does.
     CloseSteamAccount {
         seat: usize,

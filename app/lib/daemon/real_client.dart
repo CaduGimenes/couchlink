@@ -495,6 +495,23 @@ class DaemonClient extends CouchClient {
   Future<String?> openSteamAccount(int seat) => _cmd('open_steam_account', {'seat': seat});
 
   @override
+  Future<String?> setGameSteam(String recipe, String? choice) async {
+    final err = await _cmd('set_game_steam', {'recipe': recipe, 'choice': choice});
+    if (err == null) await listGames();
+    return err;
+  }
+
+  @override
+  Future<({String? path, String? error})> createShortcut(String recipe) async {
+    final r = await _request('create_shortcut', {'recipe': recipe});
+    if (r['ok'] != true) return (path: null, error: _errorOf(r));
+    return (path: r['path'] as String?, error: null);
+  }
+
+  @override
+  Future<String?> addToSteam(String recipe) => _cmd('add_to_steam', {'recipe': recipe});
+
+  @override
   Future<String?> closeSteamAccount(int seat) => _cmd('close_steam_account', {'seat': seat});
 
   @override

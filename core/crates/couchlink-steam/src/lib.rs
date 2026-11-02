@@ -21,6 +21,7 @@ pub mod goldberg_linux;
 pub mod interfaces;
 pub mod library;
 pub mod options;
+pub mod owner;
 pub mod pe;
 pub mod prepare;
 pub mod steamclient;

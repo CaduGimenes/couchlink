@@ -559,6 +559,7 @@ class GameInfo {
     this.native = false,
     this.overlay = false,
     this.hasOverlay = false,
+    this.steamChoice,
     this.tips = const [],
     this.installs = const [],
   });
@@ -596,6 +597,9 @@ class GameInfo {
   /// The game has an overlay Couchlink can bring: Goldberg's, or Steam's own for a game on real Steam (Windows).
   final bool hasOverlay;
 
+  /// The player's Steam choice: `needed`, `not_needed`, or null for automatic. [steam] already says what a start uses.
+  final String? steamChoice;
+
   /// How to play, in plain sentences.
   final List<String> tips;
 
@@ -603,24 +607,39 @@ class GameInfo {
   final List<InstallInfo> installs;
 
   /// The same game with the overlay setting [on] (for a client that keeps the list itself).
-  GameInfo withOverlay(bool on) => GameInfo(
+  GameInfo withOverlay(bool on) => _copy(overlay: on);
+
+  /// The same game with the Steam [choice] made, as couchlinkd would list it (for a client that keeps the list itself).
+  GameInfo withSteamChoice(String? choice) => _copy(
+        steam: switch ((choice, steam)) {
+          ('needed', 'none') => 'shared',
+          ('not_needed', 'shared') => 'none',
+          _ => steam,
+        },
+        steamChoice: choice,
+      );
+
+  GameInfo _copy({bool? overlay, String? steam, Object? steamChoice = _keep}) => GameInfo(
         recipe: recipe,
         game: game,
         installed: installed,
         path: path,
         minPlayers: minPlayers,
         maxPlayers: maxPlayers,
-        steam: steam,
+        steam: steam ?? this.steam,
         source: source,
         steamAppId: steamAppId,
         setup: setup,
         controls: controls,
         native: native,
-        overlay: on,
+        overlay: overlay ?? this.overlay,
         hasOverlay: hasOverlay,
+        steamChoice: identical(steamChoice, _keep) ? this.steamChoice : steamChoice as String?,
         tips: tips,
         installs: installs,
       );
+
+  static const Object _keep = Object();
 
   factory GameInfo.fromJson(Map<String, dynamic> j) {
     final p = j['players'];
@@ -650,6 +669,7 @@ class GameInfo {
       native: j['mode'] == 'native',
       overlay: j['overlay'] == true,
       hasOverlay: j['has_overlay'] == true || j['steam'] == 'goldberg',
+      steamChoice: _strOrNull(j['steam_choice']),
       tips: [if (j['tips'] is List) for (final x in j['tips'] as List) if (x is String) x],
       installs: [
         if (j['installs'] is List)

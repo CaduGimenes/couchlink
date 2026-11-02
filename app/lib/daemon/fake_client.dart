@@ -338,6 +338,37 @@ class FakeClient extends CouchClient {
   final Set<int> _steamRunning = {};
   bool _steamCloseOnEnd = false;
 
+  /// What [setGameSteam] was last given, per recipe.
+  final Map<String, String?> steamChoices = {};
+
+  /// Games [createShortcut] and [addToSteam] were asked for.
+  final List<String> shortcuts = [];
+  final List<String> addedToSteam = [];
+
+  @override
+  Future<String?> setGameSteam(String recipe, String? choice) async {
+    final g = _games.where((g) => g.recipe == recipe).firstOrNull;
+    if (g == null) return 'no game $recipe';
+    steamChoices[recipe] = choice;
+    _games = [for (final x in _games) x.recipe == recipe ? x.withSteamChoice(choice) : x];
+    notifyListeners();
+    return null;
+  }
+
+  @override
+  Future<({String? path, String? error})> createShortcut(String recipe) async {
+    final g = _games.where((g) => g.recipe == recipe).firstOrNull;
+    if (g == null) return (path: null, error: 'no game $recipe');
+    shortcuts.add(recipe);
+    return (path: 'C:/Users/Player/Desktop/${g.game} (Couchlink).lnk', error: null);
+  }
+
+  @override
+  Future<String?> addToSteam(String recipe) async {
+    addedToSteam.add(recipe);
+    return null;
+  }
+
   @override
   Future<String?> closeSteamAccount(int seat) async {
     _steamRunning.remove(seat);

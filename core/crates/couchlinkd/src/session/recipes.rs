@@ -542,8 +542,49 @@ pub fn launch_exe_present(dir: &Path, recipe: &Recipe) -> bool {
     exe.contains('$') || dir.join(exe).is_file() || Path::new(exe).is_file()
 }
 
+/// The player's "Steam" choices per game (`<state>/steam.json`: recipe id to `needed` or `not_needed`); a game left out
+/// is automatic.
+pub fn steam_choices(state_dir: &Path) -> std::collections::BTreeMap<String, String> {
+    std::fs::read(state_dir.join("steam.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+/// Save the Steam choice for a game: `needed`, `not_needed`, or `None` for automatic.
+pub fn set_steam_choice(state_dir: &Path, recipe: &str, choice: Option<&str>) -> Result<(), String> {
+    if let Some(c) = choice.filter(|c| !matches!(*c, "needed" | "not_needed")) {
+        return Err(format!("unknown Steam choice {c:?} (needed, not_needed or none)"));
+    }
+    let mut all = steam_choices(state_dir);
+    match choice {
+        Some(c) => all.insert(recipe.to_string(), c.to_string()),
+        None => all.remove(recipe),
+    };
+    std::fs::create_dir_all(state_dir).map_err(|e| e.to_string())?;
+    let tmp = state_dir.join("steam.json.tmp");
+    std::fs::write(&tmp, serde_json::to_string_pretty(&all).expect("serialises")).map_err(|e| format!("cannot save steam.json: {e}"))?;
+    std::fs::rename(&tmp, state_dir.join("steam.json")).map_err(|e| format!("cannot save steam.json: {e}"))
+}
+
+/// The game as a session runs it as far as Steam goes: online-fix found in its folder makes it a Steam game, then the
+/// player's choice wins. Needed makes a game without Steam play on real Steam (each player on their own account);
+/// not needed keeps Steam out of a game that would use real Steam. Goldberg and `accounts` recipes keep their mode.
+pub fn apply_steam_choice(state_dir: &Path, recipe: &mut Recipe, game_dir: &Path) {
+    use couchlink_core::recipe::SteamMode;
+    super::online_fix_steam(recipe, game_dir);
+    match (steam_choices(state_dir).get(&recipe.id).map(String::as_str), recipe.steam) {
+        (Some("needed"), SteamMode::None) => recipe.steam = SteamMode::Shared,
+        (Some("not_needed"), SteamMode::Shared) => recipe.steam = SteamMode::None,
+        _ => {}
+    }
+}
+
 pub fn game_info(locators: &[Locator], state_dir: &Path, r: &Recipe) -> GameInfo {
     let path = locate(locators, r);
+    // What a start would use: online-fix in the folder and the player's Steam choice.
+    let mut effective = r.clone();
+    if let Some(dir) = &path {
+        apply_steam_choice(state_dir, &mut effective, dir);
+    }
+    let r = &effective;
     // A helper the recipe looks for (`find` with a `hint`) is a setup step too, before the game folder's own steps. It
     // is only searched for once the game is installed.
     let set = games_json_vars(state_dir, &r.id);
@@ -570,6 +611,7 @@ pub fn game_info(locators: &[Locator], state_dir: &Path, r: &Recipe) -> GameInfo
         mode: r.mode,
         overlay: overlay_for(state_dir, r),
         has_overlay: has_overlay(r),
+        steam_choice: steam_choices(state_dir).get(&r.id).cloned(),
         tips: r.tips.clone(),
         installs: r.fetch.iter().map(|f| couchlink_core::session::InstallInfo { name: f.name.clone(), source: f.source.clone(), license: f.license.clone() }).collect(),
     }

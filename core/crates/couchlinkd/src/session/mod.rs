@@ -194,6 +194,44 @@ impl Config {
         recipes::set_overlay(&self.state_dir, recipe, on)
     }
 
+    /// The game's own program in its folder (`match.exe`, else what the recipe launches), when it is there.
+    pub fn game_program(&self, recipe: &str) -> Option<PathBuf> {
+        let r = self.load().recipes.into_iter().find(|r| r.id == recipe)?;
+        let dir = recipes::locate(&self.deps.locators, &r)?;
+        let exe = dir.join(r.matching.exe.as_deref().unwrap_or(&r.launch.exe));
+        exe.is_file().then_some(exe)
+    }
+
+    /// `set_game_steam`: whether a game needs Steam (`needed`, `not_needed`), or with `None` back to automatic.
+    pub fn set_game_steam(&self, recipe: &str, choice: Option<&str>) -> Result<(), String> {
+        if !self.load().recipes.iter().any(|r| r.id == recipe) {
+            return Err(format!("no game {recipe}"));
+        }
+        recipes::set_steam_choice(&self.state_dir, recipe, choice)
+    }
+
+    /// `play`: the game a launcher asks for, by recipe id, name, or a program inside its folder (`--play-exe`, as
+    /// LaunchBox hands over a game's program).
+    pub fn find_game(&self, recipe: Option<&str>, exe: Option<&str>) -> Result<String, String> {
+        let loaded = self.load();
+        if let Some(want) = recipe.map(str::trim).filter(|w| !w.is_empty()) {
+            let hit = loaded.recipes.iter().find(|r| r.id == want).or_else(|| loaded.recipes.iter().find(|r| r.game.eq_ignore_ascii_case(want)));
+            return hit.map(|r| r.id.clone()).ok_or_else(|| format!("Couchlink has no game called {want:?}"));
+        }
+        let given = exe.map(str::trim).filter(|e| !e.is_empty()).ok_or("play needs a game (recipe) or a program (exe)")?;
+        let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+        let exe = canon(Path::new(given));
+        // The game whose folder holds the program; the deepest folder wins (a mod folder inside a game's).
+        loaded
+            .recipes
+            .iter()
+            .filter_map(|r| Some((r, canon(&recipes::locate(&self.deps.locators, r)?))))
+            .filter(|(_, dir)| exe.starts_with(dir))
+            .max_by_key(|(r, dir)| (dir.components().count(), !r.id.starts_with("try-")))
+            .map(|(r, _)| r.id.clone())
+            .ok_or_else(|| format!("{given} is not in the folder of a game Couchlink knows; add the game in Couchlink first"))
+    }
+
     fn try_game(&self, recipe: &str) -> Result<(couchlink_core::Recipe, PathBuf), String> {
         if !recipe.starts_with("try-") {
             return Err(format!("{recipe} has a recipe of its own, which names its program"));
@@ -249,7 +287,7 @@ impl Config {
             .ok_or_else(|| format!("{} is not installed, or Couchlink cannot find it (add its folder to games.json in the state folder)", recipe.game))?;
         if plain {
             let mut recipe = recipes::plain_recipe(&recipe, &game_dir).ok_or_else(|| format!("no program to start was found in the folder of {} ({})", recipe.game, game_dir.display()))?;
-            online_fix_steam(&mut recipe, &game_dir);
+            recipes::apply_steam_choice(&self.state_dir, &mut recipe, &game_dir);
             let seats = plan_seats(state, &recipe, dev)?;
             let fps_limit = (state.fps_limit > 0).then_some(state.fps_limit);
             return Ok(Plan { recipe, game_dir, seats, state_dir: self.state_dir.clone(), options: BTreeMap::new(), fps_limit });
@@ -278,7 +316,7 @@ impl Config {
             recipe.files.link = couchlink_core::recipe::LinkMode::None;
             recipe.input = couchlink_core::recipe::Input { xinput: false, dinput: false, rawinput: false };
         }
-        online_fix_steam(&mut recipe, &game_dir);
+        recipes::apply_steam_choice(&self.state_dir, &mut recipe, &game_dir);
         let seats = plan_seats(state, &recipe, dev)?;
         if matches!(recipe.steam, couchlink_core::recipe::SteamMode::Goldberg | couchlink_core::recipe::SteamMode::Accounts) && self.deps.prepare.is_none() {
             return Err(format!("{} needs Steam mode {:?}, which this build of Couchlink cannot set up yet", recipe.game, recipe.steam));
@@ -355,13 +393,12 @@ pub fn spawn_recover(config: Config, report: Report) -> Result<Handle, String> {
 
 /// A game with online-fix talks to the Steam running on the PC, so each player with their own Steam account plays on
 /// it, as in a Steam game. It does so under online-fix's app id, not the game's own.
-fn online_fix_steam(recipe: &mut Recipe, game_dir: &Path) {
+pub(crate) fn online_fix_steam(recipe: &mut Recipe, game_dir: &Path) {
     use couchlink_core::recipe::SteamMode;
     if !matches!(recipe.steam, SteamMode::None | SteamMode::Shared) {
         return;
     }
     let Some(id) = steam::online_fix(game_dir) else { return };
-    crate::logfile::write("info", &format!("{} has online-fix: each player with their own Steam account plays on it", recipe.game));
     recipe.steam = SteamMode::Shared;
     if let Some(id) = id {
         for k in ["SteamAppId", "SteamGameId"] {
@@ -409,6 +446,47 @@ mod tests {
             "screens": [{ "display": "disp:1", "on": true, "seats": [0, 1], "regions": [[0.0, 0.0, 0.5, 1.0], [0.5, 0.0, 0.5, 1.0]] }]
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn a_launcher_finds_the_game_by_id_name_or_a_program_in_its_folder() {
+        let game = temp("play-game");
+        std::fs::write(game.join("FalloutNV.exe"), b"MZ").unwrap();
+        let cfg = config("play", "fallout-new-vegas-coop", &game);
+        assert_eq!(cfg.find_game(Some("fallout-new-vegas-coop"), None).unwrap(), "fallout-new-vegas-coop");
+        let by_name = cfg.load().recipes.into_iter().find(|r| r.id == "fallout-new-vegas-coop").unwrap().game;
+        assert_eq!(cfg.find_game(Some(&by_name.to_uppercase()), None).unwrap(), "fallout-new-vegas-coop");
+        let exe = game.join("FalloutNV.exe").display().to_string();
+        assert_eq!(cfg.find_game(None, Some(&exe)).unwrap(), "fallout-new-vegas-coop");
+        assert!(cfg.find_game(Some("no-such-game"), None).is_err());
+        assert!(cfg.find_game(None, Some(&std::env::temp_dir().join("elsewhere.exe").display().to_string())).is_err());
+    }
+
+    #[test]
+    fn the_steam_choice_makes_a_game_need_steam_or_keeps_steam_out() {
+        use couchlink_core::recipe::SteamMode;
+        let state = temp("steam-choice-state");
+        let game = temp("steam-choice-game");
+        std::fs::write(game.join("Game.exe"), b"MZ").unwrap();
+        let fresh = || recipes::try_recipe_with("own-game", "Game", "Game.exe", None).unwrap();
+        let mut r = fresh();
+        recipes::apply_steam_choice(&state, &mut r, &game);
+        assert_eq!(r.steam, SteamMode::None, "automatic: no Steam for a game without it");
+        recipes::set_steam_choice(&state, "own-game", Some("needed")).unwrap();
+        let mut r = fresh();
+        recipes::apply_steam_choice(&state, &mut r, &game);
+        assert_eq!(r.steam, SteamMode::Shared, "needed: every player on real Steam");
+        // online-fix makes it a Steam game; not needed keeps Steam out all the same.
+        std::fs::write(game.join("OnlineFix64.dll"), b"MZ").unwrap();
+        recipes::set_steam_choice(&state, "own-game", Some("not_needed")).unwrap();
+        let mut r = fresh();
+        recipes::apply_steam_choice(&state, &mut r, &game);
+        assert_eq!(r.steam, SteamMode::None);
+        recipes::set_steam_choice(&state, "own-game", None).unwrap();
+        let mut r = fresh();
+        recipes::apply_steam_choice(&state, &mut r, &game);
+        assert_eq!(r.steam, SteamMode::Shared, "automatic again: online-fix found");
+        assert!(recipes::set_steam_choice(&state, "own-game", Some("maybe")).is_err());
     }
 
     #[test]

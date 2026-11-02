@@ -17,6 +17,7 @@ import 'catalog_logic.dart';
 import 'controls_view.dart';
 import 'discover_view.dart';
 import 'dev_view.dart';
+import 'launchers_view.dart';
 import 'icons.dart';
 import 'kit.dart';
 import 'launch_card.dart';
@@ -163,6 +164,7 @@ class _MainPane extends StatelessWidget {
                           AppView.library => const LibraryView(),
                           AppView.players => ui.controlsSeat == null ? const PlayersView() : ControlsView(seat: ui.controlsSeat!),
                           AppView.screens => const ScreensView(),
+                          AppView.launchers => const LaunchersView(),
                           AppView.discover => const DiscoverView(),
                           AppView.recipe => const RecipePromptView(),
                           AppView.dev => const DevView(),
@@ -357,6 +359,8 @@ class Sidebar extends StatelessWidget {
                       item(AppView.players, iconPlayers, t('Players'), step: '2'),
                       const SizedBox(height: 2),
                       item(AppView.screens, iconScreens, t('Screens'), step: '3'),
+                      const SizedBox(height: 2),
+                      item(AppView.launchers, iconExternal, t('Start from other apps')),
                       _SideHeading(t('Find more')),
                       item(AppView.discover, iconDiscover, t('Co-op Anything')),
                       const SizedBox(height: 2),
