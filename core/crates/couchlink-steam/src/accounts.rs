@@ -792,6 +792,7 @@ mod imp {
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
     #[test]
     fn a_helper_users_environment_has_its_own_profile_folders() {
         let ours = [
