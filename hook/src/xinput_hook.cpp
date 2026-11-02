@@ -8,7 +8,10 @@
 #include <tlhelp32.h>
 #include <xinput.h>
 
+#include <intrin.h>
+
 #include <cwchar>
+#include <map>
 #include <set>
 
 namespace cl {
@@ -37,6 +40,10 @@ CRITICAL_SECTION g_lock;
 INIT_ONCE g_once = INIT_ONCE_STATIC_INIT;
 std::set<HMODULE> g_seen;
 std::set<void*> g_targets;
+// Each hooked XInput function and its detour. Steam's overlay (Steam Input) hooks the same functions after us and,
+// with Steam Input on, answers from the controller Steam picks without calling on: so the game's own references to
+// them (its import table, GetProcAddress) are pointed straight at the detours, which stay first whatever hooks later.
+std::map<void*, void*> g_redirect;
 
 BOOL CALLBACK InitLock(PINIT_ONCE, PVOID, PVOID*) {
     InitializeCriticalSection(&g_lock);
@@ -308,7 +315,18 @@ bool HookTarget(void* target, void* detour, void** orig, const char* label) {
     if (g_targets.count(target)) return false;  // forwarded export already hooked through another slot
     if (!InstallHookAddress(target, detour, orig, label)) return false;
     g_targets.insert(target);
+    g_redirect[target] = detour;
     return true;
+}
+
+// Modules whose own XInput calls stay as they are: Steam's overlay, which hooks XInput itself.
+bool KeepsItsImports(HMODULE m) {
+    wchar_t path[MAX_PATH * 2];
+    DWORD n = GetModuleFileNameW(m, path, ARRAYSIZE(path));
+    if (n == 0 || n >= ARRAYSIZE(path)) return true;
+    const wchar_t* base = wcsrchr(path, L'\\');
+    base = base ? base + 1 : path;
+    return m == SelfModule() || _wcsnicmp(base, L"gameoverlayrenderer", 19) == 0;
 }
 
 bool IsXInputName(const wchar_t* path, std::string* base_out) {
@@ -323,6 +341,66 @@ bool IsXInputName(const wchar_t* path, std::string* base_out) {
         }
     }
     return false;
+}
+
+// The detour for export `name` (or ordinal `ord`, when `name` is null) of XInput DLL `x`: its real address, forwards
+// followed, is the hooked target.
+FARPROC(WINAPI* o_GetProcAddress)(HMODULE, LPCSTR) = nullptr;
+void* DetourFor(HMODULE x, const char* name, WORD ord) {
+    if (!x) return nullptr;
+    auto gpa = o_GetProcAddress ? o_GetProcAddress : GetProcAddress;
+    LPCSTR what = name ? name : MAKEINTRESOURCEA(ord);
+    auto it = g_redirect.find(reinterpret_cast<void*>(gpa(x, what)));
+    if (it != g_redirect.end()) return it->second;
+    // Our stand-in for this DLL (next to the game): its exports are jump stubs that Steam hooks too, so the game goes
+    // to the hooked real DLL's detour instead.
+    if (x != SelfModule()) return nullptr;
+    for (int s = 0; s < g_slot_count; ++s) {
+        it = g_redirect.find(reinterpret_cast<void*>(gpa(g_slots[s].mod, what)));
+        if (it != g_redirect.end()) return it->second;
+    }
+    return nullptr;
+}
+
+// Points `m`'s import table entries for XInput functions at their detours, found by the names it imports (whatever
+// the entries hold now: Steam's overlay rewrites them to its own hooks too). Caller holds the lock.
+void RedirectImportsLocked(HMODULE m) {
+    if (g_redirect.empty() || KeepsItsImports(m)) return;
+    auto base = reinterpret_cast<BYTE*>(m);
+    auto dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return;
+    auto nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return;
+    const IMAGE_DATA_DIRECTORY& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (!dir.VirtualAddress || !dir.Size) return;
+    for (auto imp = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + dir.VirtualAddress); imp->Name; ++imp) {
+        std::wstring dll = Widen(reinterpret_cast<const char*>(base + imp->Name));
+        if (!IsXInputName(dll.c_str(), nullptr) || !imp->OriginalFirstThunk) continue;
+        HMODULE x = GetModuleHandleW(dll.c_str());
+        auto names = reinterpret_cast<IMAGE_THUNK_DATA*>(base + imp->OriginalFirstThunk);
+        auto slot = reinterpret_cast<void**>(base + imp->FirstThunk);
+        for (; names->u1.AddressOfData; ++names, ++slot) {
+            void* detour = IMAGE_SNAP_BY_ORDINAL(names->u1.Ordinal)
+                               ? DetourFor(x, nullptr, static_cast<WORD>(IMAGE_ORDINAL(names->u1.Ordinal)))
+                               : DetourFor(x, reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(base + names->u1.AddressOfData)->Name, 0);
+            if (!detour || *slot == detour) continue;
+            DWORD old = 0;
+            if (!VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &old)) continue;
+            *slot = detour;
+            VirtualProtect(slot, sizeof(void*), old, &old);
+        }
+    }
+}
+
+// Every module in the process gets its import table pointed at the detours (after an XInput DLL was hooked).
+void RedirectAllImports() {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, GetCurrentProcessId());
+    if (snap == INVALID_HANDLE_VALUE) return;
+    MODULEENTRY32W me;
+    me.dwSize = sizeof(me);
+    Lock l;
+    for (BOOL ok = Module32FirstW(snap, &me); ok; ok = Module32NextW(snap, &me)) RedirectImportsLocked(me.hModule);
+    CloseHandle(snap);
 }
 
 // Caller holds the lock. Returns true when new hooks were queued.
@@ -378,13 +456,41 @@ void MaybeHookLoaded(HMODULE m) {
     PadsModuleLoaded(m, path);    // no-op without pad hiding
     if (!g_cfg.xinput) return;
     std::string name;
-    if (!IsXInputName(path, &name)) return;
+    if (!IsXInputName(path, &name)) {
+        Lock l;
+        RedirectImportsLocked(m);
+        return;
+    }
     bool added;
     {
         Lock l;
         added = HookModuleLocked(m, name);
     }
-    if (added) ApplyHooks();
+    if (added) {
+        ApplyHooks();
+        RedirectAllImports();
+    }
+}
+
+
+// A game that looks XInput up by name gets the detour too, so Steam's hook on top cannot answer for it. Our own
+// lookups (finding what to hook) and Steam's overlay get the real functions.
+FARPROC WINAPI d_GetProcAddress(HMODULE m, LPCSTR name) {
+    FARPROC p = o_GetProcAddress(m, name);
+    if (!p) return p;
+    HMODULE caller = nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                       reinterpret_cast<LPCWSTR>(_ReturnAddress()), &caller);
+    if (caller && KeepsItsImports(caller)) return p;
+    Lock l;
+    auto it = g_redirect.find(reinterpret_cast<void*>(p));
+    if (it != g_redirect.end()) return reinterpret_cast<FARPROC>(it->second);
+    if (m == SelfModule() && name) {
+        void* d = DetourFor(m, reinterpret_cast<uintptr_t>(name) > 0xFFFF ? name : nullptr,
+                            static_cast<WORD>(reinterpret_cast<uintptr_t>(name)));
+        if (d) return reinterpret_cast<FARPROC>(d);
+    }
+    return p;
 }
 
 HMODULE(WINAPI* o_LoadLibraryExW)(LPCWSTR, HANDLE, DWORD) = nullptr;
@@ -437,6 +543,21 @@ void InstallXInput() {
     InstallHook(kb, "LoadLibraryExA", reinterpret_cast<void*>(&d_LoadLibraryExA), reinterpret_cast<void**>(&o_LoadLibraryExA));
     InstallHook(kb, "LoadLibraryW", reinterpret_cast<void*>(&d_LoadLibraryW), reinterpret_cast<void**>(&o_LoadLibraryW));
     InstallHook(kb, "LoadLibraryA", reinterpret_cast<void*>(&d_LoadLibraryA), reinterpret_cast<void**>(&o_LoadLibraryA));
+    if (g_cfg.xinput) {
+        InstallHook(kb, "GetProcAddress", reinterpret_cast<void*>(&d_GetProcAddress), reinterpret_cast<void**>(&o_GetProcAddress));
+        RedirectAllImports();
+        // Steam's overlay may come in later and point the imports at its own hooks again: take them back every 2 s.
+        HANDLE t = CreateThread(
+            nullptr, 0,
+            [](LPVOID) -> DWORD {
+                for (;;) {
+                    Sleep(2000);
+                    RedirectAllImports();
+                }
+            },
+            nullptr, 0, nullptr);
+        if (t) CloseHandle(t);
+    }
     g_features.xinput = g_cfg.xinput;
 }
 

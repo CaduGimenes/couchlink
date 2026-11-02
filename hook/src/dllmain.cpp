@@ -188,7 +188,11 @@ void Preload() {
     }
 }
 
+// The stand-in's preload: Steam's overlay, loaded while the game itself still starts (a copy running as a player's own
+// Windows user), held the loader lock waiting on its Steam and the game never got its window. It goes in once the
+// game has its window instead; the overlay hooks the game's drawing from then on.
 DWORD WINAPI PreloadThread(LPVOID) {
+    for (int i = 0; i < 300 && !FindMainWindow(); ++i) Sleep(100);
     Preload();
     return 0;
 }
@@ -257,8 +261,8 @@ std::string ApplyConfig(const Json& c) {
     ApplyHooks();
     if (!g_cfg.preload.empty()) {
         if (std::string(g_load_mode) == "proxy") {
-            // The stand-in runs under the loader lock, where no library may be loaded: a thread loads them as soon
-            // as the lock is free, still before the game's own code gets far.
+            // The stand-in runs under the loader lock, where no library may be loaded: a thread loads them once the
+            // game has its window (PreloadThread).
             HANDLE t = CreateThread(nullptr, 0, PreloadThread, nullptr, 0, nullptr);
             if (t) CloseHandle(t);
         } else {
