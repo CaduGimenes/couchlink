@@ -78,16 +78,37 @@ pub fn address_text(address: u64) -> String {
 /// What can turn a pad off, from what SDL knows of it: its path (`XInput#N` for a pad SDL drives through XInput), its
 /// serial number (the Bluetooth address for a Bluetooth HID pad) and whether it is wireless.
 pub fn target_for(connection: Connection, path: Option<&str>, serial: Option<&str>) -> Option<Target> {
-    if connection != Connection::Wireless {
+    target_with(connection, path, serial, bluetooth_connected)
+}
+
+/// `target_for`, with how to ask whether a Bluetooth address is connected now. SDL often cannot tell how a pad is
+/// connected (a DualSense over Bluetooth shows as unknown): a pad whose serial is the address of a connected
+/// Bluetooth device is on Bluetooth all the same.
+fn target_with(connection: Connection, path: Option<&str>, serial: Option<&str>, connected: impl Fn(u64) -> bool) -> Option<Target> {
+    if connection == Connection::Usb {
         return None;
     }
     if let Some(slot) = path.and_then(|p| p.strip_prefix("XInput#")).and_then(|n| n.parse::<u32>().ok()) {
-        return cfg!(windows).then_some(Target::XInput(slot));
+        return (cfg!(windows) && connection == Connection::Wireless).then_some(Target::XInput(slot));
     }
     if !cfg!(any(windows, target_os = "linux")) {
         return None;
     }
-    serial.and_then(parse_address).map(Target::Bluetooth)
+    let address = serial.and_then(parse_address)?;
+    (connection == Connection::Wireless || connected(address)).then_some(Target::Bluetooth(address))
+}
+
+/// True while `address` is a Bluetooth device connected to this PC (Windows asks the radios; elsewhere unknown).
+fn bluetooth_connected(address: u64) -> bool {
+    #[cfg(windows)]
+    {
+        win::bluetooth_connected(address)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = address;
+        false
+    }
 }
 
 #[cfg(windows)]
@@ -160,6 +181,19 @@ mod win {
         if done { Ok(()) } else { Err("Windows could not disconnect the controller (is it still connected over Bluetooth?)".to_string()) }
     }
 
+    /// True when a radio knows `address` as a connected device.
+    pub fn bluetooth_connected(address: u64) -> bool {
+        use windows_sys::Win32::Devices::Bluetooth::{BluetoothGetDeviceInfo, BLUETOOTH_DEVICE_INFO};
+        // SAFETY: a zeroed BLUETOOTH_DEVICE_INFO is valid; dwSize and the address are set before the call, which
+        // searches every radio when given none.
+        unsafe {
+            let mut info: BLUETOOTH_DEVICE_INFO = std::mem::zeroed();
+            info.dwSize = std::mem::size_of::<BLUETOOTH_DEVICE_INFO>() as u32;
+            info.Address.Anonymous.ullLong = address;
+            BluetoothGetDeviceInfo(std::ptr::null_mut(), &mut info) == 0 && info.fConnected != 0
+        }
+    }
+
     /// Power off the controller in an XInput slot.
     pub fn xinput_power_off(slot: u32) -> Result<(), String> {
         for dll in [&b"xinput1_4.dll\0"[..], &b"xinput1_3.dll\0"[..]] {
@@ -198,6 +232,15 @@ mod tests {
         for s in ["", "0000000000000", "000000000000", "a4ae1234abc", "a4ae1234abcdef", "g4ae1234abcd", "Controller 1"] {
             assert_eq!(parse_address(s), None, "{s:?}");
         }
+    }
+
+    #[test]
+    fn a_pad_of_unknown_connection_is_on_bluetooth_when_its_address_is_connected() {
+        let serial = Some("a4:ae:12:34:ab:cd");
+        assert_eq!(target_with(Connection::Unknown, None, serial, |_| true), Some(Target::Bluetooth(0xA4AE_1234_ABCD)));
+        assert_eq!(target_with(Connection::Unknown, None, serial, |_| false), None, "not connected over Bluetooth: no button");
+        assert_eq!(target_with(Connection::Usb, None, serial, |_| true), None, "on a cable it stays on");
+        assert_eq!(target_with(Connection::Unknown, Some("XInput#1"), None, |_| true), None, "XInput only when SDL says wireless");
     }
 
     #[test]
