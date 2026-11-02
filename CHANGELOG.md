@@ -3,6 +3,14 @@
 What changed in each Couchlink release. Downloads and older notes are on the
 [releases page](https://github.com/cranebeaker/couchlink/releases).
 
+## 0.1.16
+
+### Fixed
+
+- **.NET games did not start: "the program did not reach its entry point".** Celeste and other games built on .NET
+  (FNA and XNA games among them) never run their exe's own entry point, which Couchlink waited for before putting its
+  controls in. Couchlink now waits for their .NET runtime instead.
+
 ## 0.1.15
 
 ### New
