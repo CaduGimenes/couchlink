@@ -118,6 +118,8 @@ pub struct Hub {
     model: Model,
     sdl: SdlHandle,
     clients: HashMap<u64, Client>,
+    /// Pairing new Bluetooth controllers (the app's pairing dialog).
+    bluetooth: crate::bluetooth::Bluetooth,
     /// Pads that are virtual (debug_press only works on these).
     virtual_pads: HashSet<String>,
     /// Seat each pad's LED/player index was last set for.
@@ -202,6 +204,7 @@ impl Hub {
             update_busy: (false, false),
             sdl,
             clients: HashMap::new(),
+            bluetooth: crate::bluetooth::Bluetooth::system(),
             virtual_pads: HashSet::new(),
             applied: HashMap::new(),
             last_input: None,
@@ -331,6 +334,7 @@ impl Hub {
                 HubMsg::Disconnect { client } => {
                     self.clients.remove(&client);
                     if self.clients.is_empty() {
+                        self.bluetooth.set_scan(false);
                         idle_since = Some(Instant::now());
                     }
                     self.update_subscription();
@@ -826,6 +830,12 @@ impl Hub {
                 self.broadcast(&Event::GamesChanged);
                 Ok(crate::accounts::owner())
             }
+            Command::BluetoothScan { on } => {
+                self.bluetooth.set_scan(on);
+                Ok(none)
+            }
+            Command::BluetoothDevices => Ok(self.bluetooth.devices()),
+            Command::BluetoothPair { id } => self.bluetooth.pair(&id).map(|_| none),
             Command::CloseSteamAccount { seat } => crate::accounts::close(seat).map(|_| none),
             Command::SetSteamCloseOnEnd { on } => {
                 save_setting("steam_close_on_end", json!(on));

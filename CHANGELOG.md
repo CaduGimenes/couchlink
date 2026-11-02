@@ -3,6 +3,32 @@
 What changed in each Couchlink release. Downloads and older notes are on the
 [releases page](https://github.com/cranebeaker/couchlink/releases).
 
+## 0.1.15
+
+### New
+
+- **Shift+Tab opens Steam's overlay in a player's game.** Steam only takes Shift+Tab from the window in front, and
+  during a session no game is. Now Shift+Tab on a player's own keyboard asks Steam to open the overlay in their copy
+  and brings that copy in front so they can use it; Shift+Tab again or Esc closes it. Shift on its own does nothing
+  new. It also works for the host after taking every keyboard and mouse (Ctrl+Shift+K).
+- **Controllers move while games run.** A controller given to another player (or swapped) in Players reaches that
+  player's game straight away, also for a player who started with only a keyboard. Taken away, it shows as unplugged.
+- **Turn a controller off.** A power button on wireless controllers under Devices, and a button combo held for two
+  seconds (Settings, Bindings; off by default) turn a Bluetooth or Xbox wireless controller off.
+- **Pair a controller.** "Pair a controller" under Devices finds controllers in pairing mode (PlayStation, Switch,
+  Xbox over Bluetooth) and pairs them. Windows only.
+- **Player 1's Steam.** Player 1 has a Steam button too: whether your Steam runs, Open Steam, and the Steam folder
+  Couchlink uses, with a way to pick another one when Steam is somewhere else.
+
+### Fixed
+
+- **Your Steam did not open by itself** for a game that needs Steam, when it had been closed: Couchlink took the
+  account Steam leaves behind for a running Steam. It checks that Steam runs now.
+- **Linux: player 2's Steam crashed on sign-in** in some setups: its helper programs now also get the seat's own IPC
+  name, so they do not talk to your Steam.
+- **Linux: reports say why a game stopped.** Each game's log has Wine's errors, and "Save full report" has each
+  player's own Steam logs.
+
 ## 0.1.14
 
 ### New

@@ -9,7 +9,7 @@ import 'locate.dart';
 import 'models.dart';
 import 'profile.dart';
 
-const String appVersion = '0.1.14';
+const String appVersion = '0.1.15';
 
 /// Start of the `log` warning couchlinkd sends when a catalog download fails.
 const String catalogFailurePrefix = 'Game catalog could not be refreshed';
@@ -531,6 +531,19 @@ class DaemonClient extends CouchClient {
 
   @override
   Future<String?> removeSteamAccount(int seat) => _cmd('remove_steam_account', {'seat': seat});
+
+  @override
+  Future<({BluetoothPads? value, String? error})> bluetoothDevices() async {
+    final r = await _request('bluetooth_devices', const {});
+    if (r['ok'] != true) return (value: null, error: _errorOf(r));
+    return (value: BluetoothPads.fromJson(r), error: null);
+  }
+
+  @override
+  Future<String?> bluetoothScan(bool on) => _cmd('bluetooth_scan', {'on': on});
+
+  @override
+  Future<String?> bluetoothPair(String id) => _cmd('bluetooth_pair', {'id': id});
 
   // ---- controller profiles
 

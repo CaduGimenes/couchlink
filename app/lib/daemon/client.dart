@@ -234,6 +234,17 @@ abstract class CouchClient extends ChangeNotifier {
   /// `remove_steam_account`: the seat goes back to the PC owner's account (one Windows prompt).
   Future<String?> removeSteamAccount(int seat);
 
+  // ---- pairing Bluetooth controllers (docs/protocol.md)
+
+  /// `bluetooth_devices`: the controllers found in pairing mode and how pairing with each goes.
+  Future<({BluetoothPads? value, String? error})> bluetoothDevices();
+
+  /// `bluetooth_scan`: start or stop looking for controllers in pairing mode.
+  Future<String?> bluetoothScan(bool on);
+
+  /// `bluetooth_pair`: pairs with a listed controller. Replies at once; `bluetoothDevices` shows the outcome.
+  Future<String?> bluetoothPair(String id);
+
   /// Fake client only: acts as pressing key 1 to 4.
   void debugKey(int n) {}
 

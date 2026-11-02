@@ -1,6 +1,7 @@
 //! couchlinkd: the Couchlink background daemon.
 
 mod accounts;
+mod bluetooth;
 mod catalog;
 mod crash;
 mod displays;
