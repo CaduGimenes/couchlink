@@ -560,6 +560,8 @@ mod tests {
         assert!(attach("Local\\couchlink-pad-none-0", &["kbm:system".to_string()]).is_err());
     }
 
+    // Feeds are the Windows hook's; Linux gives each copy its controller by the sandbox.
+    #[cfg(windows)]
     #[test]
     fn a_controller_given_to_a_player_while_the_copies_run_reaches_their_copy() {
         let name = format!("Local\\couchlink-pad-test-reassign-{}", std::process::id());
