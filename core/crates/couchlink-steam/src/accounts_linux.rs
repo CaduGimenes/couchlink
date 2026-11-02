@@ -163,6 +163,9 @@ pub fn start_steam_logged(cfg: &AccountsConfig, log: Option<&Path>) -> Result<u3
 fn seat_env(home: &Path, cfg: &AccountsConfig) -> Vec<(String, String)> {
     let user = format!("couchlink-seat{}", cfg.seat as u32 + 1);
     let mut env = vec![("HOME".to_string(), home.display().to_string()), ("USER".to_string(), user.clone()), ("LOGNAME".to_string(), user)];
+    // The IPC name in the environment too, not only on Steam's command line: the processes Steam starts (its web
+    // helper) read it from there, and without it would talk to the desktop's Steam.
+    env.push(("steam_master_ipc_name_override".to_string(), cfg.ipc_name()));
     for (var, sub) in [("XDG_CONFIG_HOME", ".config"), ("XDG_DATA_HOME", ".local/share"), ("XDG_STATE_HOME", ".local/state"), ("XDG_CACHE_HOME", ".cache")] {
         env.push((var.to_string(), home.join(sub).display().to_string()));
     }
@@ -251,6 +254,7 @@ mod tests {
         assert_eq!(env["HOME"], "/h/seat2");
         assert_eq!(env["XDG_DATA_HOME"], "/h/seat2/.local/share", "never the desktop's own XDG folders");
         assert_eq!(env["USER"], "couchlink-seat2");
+        assert_eq!(env["steam_master_ipc_name_override"], "couchlink_seat2", "Steam's own helpers find the seat's Steam too");
         for name in ["SteamAppId", "LD_PRELOAD", "LD_LIBRARY_PATH", "SteamDeck", "STEAM_COMPAT_DATA_PATH", "PRESSURE_VESSEL_FILESYSTEMS_RO"] {
             assert!(foreign_steam_env(name), "{name} is the desktop Steam's");
         }
