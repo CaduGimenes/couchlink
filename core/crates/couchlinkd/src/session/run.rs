@@ -184,6 +184,8 @@ impl Run {
         s.error = error;
         // The input feeds know which windows are the games' (only while a game is in front).
         super::rawkbm::set_copy_pids(self.seats.iter().filter_map(|s| s.window_pid.or_else(|| s.child.as_ref().map(|c| c.pid()))).collect());
+        // Shift+Tab brings a copy in front for Steam's overlay, in games that have it.
+        super::rawkbm::set_steam_overlay(!self.preload(Some(idx)).is_empty(), super::window::bring_to_front, super::window::release_focus_now);
         self.publish();
     }
 
@@ -834,7 +836,8 @@ impl Run {
     /// frames. Every copy believes it has the focus anyway (the hook), so the focus goes back to the desktop. Not when
     /// someone plays on the desktop's own keyboard and mouse, who needs the real focus.
     fn keep_focus_off_copies(&mut self) {
-        if self.seats.iter().any(|s| s.plan.devices.iter().any(|d| d == "kbm:system")) {
+        // A player using Steam's overlay keeps their copy in front until they close it.
+        if self.seats.iter().any(|s| s.plan.devices.iter().any(|d| d == "kbm:system")) || super::rawkbm::overlay_copy().is_some() {
             return;
         }
         let Some(front) = super::window::foreground_pid() else { return };
@@ -936,6 +939,7 @@ impl Run {
         self.presenters.clear();
         super::rawkbm::set_redirects(Vec::new());
         super::rawkbm::set_copy_pids(Vec::new());
+        super::rawkbm::set_steam_overlay(false, super::window::bring_to_front, super::window::release_focus_now);
         self.placer.restore_all();
         for s in self.seats.iter().filter(|s| !s.exited) {
             if let Some(c) = &s.child {

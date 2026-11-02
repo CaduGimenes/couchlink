@@ -91,6 +91,21 @@ pub fn save_report(state: &serde_json::Value, session: &serde_json::Value) -> Re
             }
         }
     }
+    // Linux: the logs of each player's own Steam (`accounts_linux.rs`), which say why that Steam or its web view stops.
+    if let Some(data) = linux_data_home() {
+        for seat in std::fs::read_dir(data.join("couchlink")).into_iter().flatten().flatten() {
+            if !seat.file_name().to_string_lossy().starts_with("steam-seat-") {
+                continue;
+            }
+            let steam_logs = seat.path().join(".local/share/Steam/logs");
+            for name in ["bootstrap_log.txt", "stderr.txt", "cef_log.txt", "webhelper.txt", "console_log.txt", "connection_log.txt"] {
+                let log = steam_logs.join(name);
+                if log.is_file() {
+                    logs.push(log);
+                }
+            }
+        }
+    }
     logs.sort();
     for log in &logs {
         let text = read_end(log, REPORT_MAX_BYTES).unwrap_or_else(|e| format!("(cannot read: {e})"));
@@ -126,6 +141,17 @@ fn read_end(path: &std::path::Path, max: u64) -> std::io::Result<String> {
     }
     let rest = text.split_once('\n').map_or(&*text, |(_, rest)| rest);
     Ok(format!("(the first {} MB are left out)\n{rest}", start.div_ceil(1 << 20)))
+}
+
+/// `$XDG_DATA_HOME`, else `~/.local/share` (Linux), where each player's own Steam lives.
+fn linux_data_home() -> Option<PathBuf> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    match std::env::var_os("XDG_DATA_HOME").filter(|d| !d.is_empty()) {
+        Some(d) => Some(PathBuf::from(d)),
+        None => home_dir().map(|h| PathBuf::from(h).join(".local").join("share")),
+    }
 }
 
 fn home_dir() -> Option<String> {

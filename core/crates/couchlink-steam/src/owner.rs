@@ -5,9 +5,10 @@ use std::path::PathBuf;
 
 /// True while the PC owner's Steam runs with an account signed in.
 pub fn owner_steam_ready() -> bool {
+    // Steam leaves the last account in the registry when it quits: it must also still run.
     #[cfg(windows)]
     {
-        active_user().is_some_and(|u| u != 0)
+        active_user().is_some_and(|u| u != 0) && owner_steam_running()
     }
     #[cfg(target_os = "linux")]
     {

@@ -103,6 +103,7 @@ enum Counter {
     C_CHILDREN_FAILED,
     C_CHILDREN_SKIPPED,
     C_PADS_HIDDEN,
+    C_OVERLAY_OPENED,
     C_COUNT
 };
 void Bump(Counter c, uint64_t n = 1);
@@ -157,6 +158,8 @@ bool KbmFilterMessage(MSG* m);
 bool KbmTakeFakeKeyDown(const MSG* m);
 // Pulls pending feed events into the state and posts the resulting window messages.
 void KbmDrain();
+// A key from the copy's own keyboard went down (`shift`: a Shift key is down too): Shift+Tab opens Steam's overlay.
+void SteamOverlayKey(uint16_t vk, bool shift);
 
 // Children: JSON status of the processes this process hooked, for StatusJson.
 std::string ChildrenJson();

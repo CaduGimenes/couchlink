@@ -312,6 +312,8 @@ struct Registry {
     only_front: bool,
     /// Finds what is in front (the platform's when None; tests put their own).
     foreground: Option<fn() -> Foreground>,
+    /// Seats holding a Shift key, for Shift+Tab (Steam's overlay, see [`overlay_key`]).
+    overlay_shift: HashSet<u64>,
 }
 
 static REGISTRY: LazyLock<Mutex<Registry>> = LazyLock::new(|| Mutex::new(Registry::default()));
@@ -372,7 +374,11 @@ impl Registry {
         for seat in self.seats.iter_mut() {
             if let Some(idx) = seat.devices.iter().position(|d| d == device) {
                 match input {
-                    Input::Key { vk, scan, flags } => seat.feed.push_key(idx as u8, vk, scan, flags),
+                    Input::Key { vk, scan, flags } => {
+                        let copy = seat.pids.first().copied().unwrap_or_else(|| seat.feed.hook_pid());
+                        overlay_key(&mut self.overlay_shift, seat.id, copy, vk, flags);
+                        seat.feed.push_key(idx as u8, vk, scan, flags)
+                    }
                     Input::Mouse { dx, dy, flags, wheel } => {
                         if dx != 0 || dy != 0 || flags != 0 {
                             seat.feed.push_mouse(idx as u8, dx, dy, flags, wheel)
@@ -700,6 +706,78 @@ pub fn toggle_takeover() -> Option<bool> {
         let _ = start();
     }
     Some(on)
+}
+
+/// The session's copies have Steam's overlay (a game on real Steam, see the hook's steam_overlay.cpp).
+static STEAM_OVERLAY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The copy whose Steam overlay is open (its process), 0 for none: it stays in front meanwhile.
+static OVERLAY_COPY: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Bringing a copy in front and giving the focus back to the desktop (session/window.rs), handed over by the session.
+static FOCUS: Mutex<Option<(fn(u32), fn())>> = Mutex::new(None);
+
+fn focus() -> Option<(fn(u32), fn())> {
+    *FOCUS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Whether the running session's copies have Steam's overlay (`front` brings a copy in front, `back` gives the focus to
+/// the desktop); off when the session ends.
+pub fn set_steam_overlay(on: bool, front: fn(u32), back: fn()) {
+    *FOCUS.lock().unwrap_or_else(|e| e.into_inner()) = Some((front, back));
+    STEAM_OVERLAY.store(on, std::sync::atomic::Ordering::Relaxed);
+    if !on {
+        OVERLAY_COPY.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// The copy whose Steam overlay a player opened, kept in front so they can use it.
+pub fn overlay_copy() -> Option<u32> {
+    Some(OVERLAY_COPY.load(std::sync::atomic::Ordering::Relaxed)).filter(|p| *p != 0)
+}
+
+/// Shift+Tab on a player's own keyboard opens Steam's overlay in their copy (the hook asks Steam for it) and brings that
+/// copy in front, the only place the overlay takes keys and clicks from. Shift+Tab again or Esc closes it, and the
+/// focus goes back to the desktop once the overlay has had the key. Shift alone (sprinting, say) does nothing.
+fn overlay_key(shift: &mut HashSet<u64>, seat: u64, copy: u32, vk: u16, flags: u16) {
+    use std::sync::atomic::Ordering::Relaxed;
+    if !STEAM_OVERLAY.load(Relaxed) || copy == 0 {
+        return;
+    }
+    let up = flags & key_flags::BREAK != 0;
+    match vk {
+        0x10 | 0xA0 | 0xA1 => {
+            if up {
+                shift.remove(&seat);
+            } else {
+                shift.insert(seat);
+            }
+        }
+        0x09 if !up && shift.contains(&seat) => {
+            if OVERLAY_COPY.swap(copy, Relaxed) == copy {
+                OVERLAY_COPY.store(0, Relaxed);
+                give_back_focus();
+            } else if let Some((front, _)) = focus().filter(|_| !cfg!(test)) {
+                std::thread::spawn(move || front(copy));
+            }
+        }
+        0x1B if !up && OVERLAY_COPY.compare_exchange(copy, 0, Relaxed, Relaxed).is_ok() => give_back_focus(),
+        _ => {}
+    }
+}
+
+/// The desktop takes the focus again, a moment after the overlay got the closing key.
+fn give_back_focus() {
+    // Tests leave the PC's own windows alone.
+    if cfg!(test) {
+        return;
+    }
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        if let Some((_, back)) = focus().filter(|_| overlay_copy().is_none()) {
+            back();
+        }
+    });
 }
 
 /// The copy fed by `name` runs in process `pid` (host control finds it by the window under the pointer).
@@ -1351,6 +1429,35 @@ pub fn test_attach(name: &str, devices: &[String]) -> Result<KbmGuard, String> {
     reg.seats.push(Seat { id, name: name.to_string(), feed, devices: ids, pids: Vec::new() });
     reg.update_handles();
     Ok(KbmGuard { id, name: name.to_string() })
+}
+
+#[cfg(test)]
+mod overlay_tests {
+    use super::*;
+
+    #[test]
+    fn shift_tab_opens_steams_overlay_and_shift_alone_does_nothing() {
+        let _l = test_lock();
+        let mut shift = HashSet::new();
+        let key = |shift: &mut HashSet<u64>, vk: u16, up: bool| overlay_key(shift, 1, 42, vk, if up { key_flags::BREAK } else { 0 });
+        set_steam_overlay(true, |_| {}, || {});
+        key(&mut shift, 0xA0, false);
+        key(&mut shift, 0xA0, true);
+        key(&mut shift, 0x09, false);
+        assert_eq!(overlay_copy(), None, "Shift and then Tab on its own: nothing");
+        key(&mut shift, 0xA0, false);
+        key(&mut shift, 0x09, false);
+        assert_eq!(overlay_copy(), Some(42), "Shift+Tab opens it for that copy");
+        key(&mut shift, 0x09, false);
+        assert_eq!(overlay_copy(), None, "Shift+Tab again closes it");
+        key(&mut shift, 0x09, false);
+        assert_eq!(overlay_copy(), Some(42));
+        key(&mut shift, 0x1B, false);
+        assert_eq!(overlay_copy(), None, "Esc closes it too");
+        set_steam_overlay(false, |_| {}, || {});
+        key(&mut shift, 0x09, false);
+        assert_eq!(overlay_copy(), None, "a game without Steam's overlay keeps Shift+Tab");
+    }
 }
 
 #[cfg(test)]

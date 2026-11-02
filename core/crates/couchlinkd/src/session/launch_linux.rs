@@ -139,6 +139,9 @@ fn helper_line(spec: &LaunchSpec, tools: &Tools) -> Result<Line, String> {
 fn proton_command(tools: &Tools, choice: &str, game_id: &str, app_id: Option<u32>, data: &Path, env: &mut BTreeMap<String, String>) -> Result<(PathBuf, Vec<String>, bool), String> {
     // Wine's controller driver reads hidraw too; the sandbox has hidden every other seat's hidraw nodes.
     env.entry("PROTON_ENABLE_HIDRAW".into()).or_insert_with(|| "1".into());
+    // Proton silences Wine unless asked; its errors (a crash, a file it cannot open) go to the copy's log, which a
+    // full report carries. Only errors: the rest would be hundreds of MB.
+    env.entry("WINEDEBUG".into()).or_insert_with(|| "err+all,fixme-all".into());
     if let Some(umu) = &tools.umu {
         env.insert("WINEPREFIX".into(), data.join("prefix").display().to_string());
         env.insert("GAMEID".into(), game_id.to_string());

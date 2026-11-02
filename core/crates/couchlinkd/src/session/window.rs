@@ -123,6 +123,20 @@ pub fn pick_process(procs: &[ProcInfo], root: u32, wanted: &str, started_after: 
     procs.iter().filter(hit).find(|(pid, _, _)| started_after(*pid)).map(|(pid, _, _)| *pid)
 }
 
+/// Brings the copy in process `pid` (its biggest window) in front, for its player to use Steam's overlay (Windows).
+pub fn bring_to_front(pid: u32) {
+    #[cfg(windows)]
+    win::bring_to_front(pid);
+    #[cfg(not(windows))]
+    let _ = pid;
+}
+
+/// Gives the focus to the desktop now, so no copy is in front (Windows).
+pub fn release_focus_now() {
+    #[cfg(windows)]
+    win::release_focus();
+}
+
 /// The process of the window in front, where the platform tells (Windows).
 pub fn foreground_pid() -> Option<u32> {
     #[cfg(windows)]
@@ -571,10 +585,22 @@ mod win {
     }
 
     pub fn release_focus() {
+        // SAFETY: plain call.
+        to_front(unsafe { GetShellWindow() });
+    }
+
+    pub fn bring_to_front(pid: u32) {
+        if let Some((_, hwnd)) = search(pid).best {
+            to_front(hwnd);
+        }
+    }
+
+    /// Makes `hwnd` the window in front.
+    fn to_front(hwnd: HWND) {
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::{INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_MENU};
         // SAFETY: plain calls; the input array lives through SendInput.
         unsafe {
-            let shell = GetShellWindow();
+            let shell = hwnd;
             if shell.is_null() || SetForegroundWindow(shell) != 0 {
                 return;
             }

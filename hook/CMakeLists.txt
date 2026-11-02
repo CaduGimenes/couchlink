@@ -44,6 +44,7 @@ add_library(hook_core OBJECT
   src/kbm_cursor.cpp
   src/child_hook.cpp
   src/pads_hook.cpp
+  src/steam_overlay.cpp
   ${MINHOOK_SRC})
 target_include_directories(hook_core PRIVATE src ${MINHOOK_DIR}/include)
 target_compile_definitions(hook_core PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)

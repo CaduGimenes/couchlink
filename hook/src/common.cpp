@@ -21,6 +21,7 @@ const char* const kCounterNames[C_COUNT] = {
     "kbm_real_dropped",   "kbm_state_queries", "kbm_cursor_queries", "kbm_dinput_reads", "kbm_raw_reads",
     "children_hooked",    "children_failed",   "children_skipped",
     "pads_hidden",
+    "overlay_opened",
 };
 
 std::atomic<uint64_t> g_counters[C_COUNT];

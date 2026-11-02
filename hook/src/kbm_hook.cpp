@@ -331,6 +331,8 @@ void OnKey(const KbmEvent& e, Batch& b, HWND anchor) {
         g_s.async_press[vk] = 1;
         g_s.async_press[GenericVk(vk)] = 1;
         if (vk == VK_CAPITAL || vk == VK_NUMLOCK || vk == VK_SCROLL) g_s.toggled[vk] ^= 1;
+        // Steam's overlay reads only the real keyboard, and only while the copy is in front (steam_overlay.cpp).
+        SteamOverlayKey(vk, g_s.down[VK_SHIFT] != 0);
     }
     uint8_t dik = static_cast<uint8_t>((scan & 0x7F) | (e0 ? 0x80 : 0));
     g_s.dik[dik] = up ? 0 : 0x80;
