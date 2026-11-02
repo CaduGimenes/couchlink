@@ -3,6 +3,22 @@
 What changed in each Couchlink release. Downloads and older notes are on the
 [releases page](https://github.com/cranebeaker/couchlink/releases).
 
+## 0.1.14
+
+### New
+
+- **Start from other apps.** A new page in the sidebar has the launch command for every installed game, with steps
+  and copy buttons for Steam, Playnite and LaunchBox. `couchlink.exe --play <game>` starts the game with the players
+  and screens set up in Couchlink, and starts Couchlink first when it is not running.
+  - **Steam:** "Add to Steam" puts the game in your library as a non-Steam game (Steam closes and opens again to show
+    it; your other non-Steam games stay, and the old list is kept as a backup). Press Play in Steam, Big Picture too.
+  - **LaunchBox:** add Couchlink once as an emulator with `--play-exe`, and every game on that platform opens through
+    Couchlink by itself.
+  - **Desktop shortcut:** one button, with the game's own icon.
+- **Steam per game.** Each game's page has Steam: Automatic, Needed or Not needed. Needed opens your Steam and every
+  extra player's own Steam when a session starts, and waits until they are signed in. Automatic picks Needed for
+  Steam games and games with online-fix, which now also say so on their page.
+
 ## 0.1.13
 
 ### New
