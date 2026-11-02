@@ -3,6 +3,16 @@
 What changed in each Couchlink release. Downloads and older notes are on the
 [releases page](https://github.com/cranebeaker/couchlink/releases).
 
+## 0.1.17
+
+### Fixed
+
+- **With Steam Input on, a controller reached the wrong copy.** Steam hooks the game's controller reads and answered
+  them with its own pick, so a pad could drive player 1 and player 2 at once, or a copy whose seat had no pad. Each
+  copy now reads only its own player's controller, with Steam Input on or off.
+- **PlayStation controllers were drawn with the Xbox layout.** The controller page now shows the d-pad top left and
+  both sticks low, like a real DualSense or DualShock.
+
 ## 0.1.16
 
 ### Fixed
