@@ -52,6 +52,31 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
   });
 
+  testWidgets('a Bluetooth controller in pairing mode can be paired from the Devices row', (tester) async {
+    final fake = newFake();
+    await pumpApp(tester, fake, size: const Size(1400, 1100));
+    expect(fake.bluetoothScanning, isFalse);
+    await tester.tap(byKey('pair-tile'));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Pick it below.'), findsOneWidget);
+    expect(fake.bluetoothScanning, isTrue);
+    expect(byKey('pair-scanning'), findsOneWidget);
+    expect(find.text('PlayStation 4 · ready to pair'), findsOneWidget);
+    expect(find.text('Pair'), findsOneWidget);
+    await tester.tap(byKey('pair-bt:ds4'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Pairing…'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 1500));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Paired'), findsOneWidget);
+    await tester.tap(byKey('pair-done'));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(byKey('pair-done'), findsNothing);
+    expect(fake.bluetoothScanning, isFalse, reason: 'closing the dialog stops scanning');
+  });
+
   testWidgets('shows the four seats and the devices', (tester) async {
     final fake = newFake();
     await pumpApp(tester, fake);

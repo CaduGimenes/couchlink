@@ -415,6 +415,34 @@ class FakeClient extends CouchClient {
     return null;
   }
 
+  /// Bluetooth pairing: scanning finds one controller in pairing mode; pairing takes a moment.
+  bool bluetoothScanning = false;
+  String _padState = 'found';
+
+  @override
+  Future<({BluetoothPads? value, String? error})> bluetoothDevices() async => (
+        value: BluetoothPads(
+          available: true,
+          scanning: bluetoothScanning,
+          devices: [if (bluetoothScanning) BluetoothPad(id: 'bt:ds4', name: 'Wireless Controller', kind: 'PlayStation 4', state: _padState)],
+        ),
+        error: null,
+      );
+
+  @override
+  Future<String?> bluetoothScan(bool on) async {
+    bluetoothScanning = on;
+    if (!on) _padState = 'found';
+    return null;
+  }
+
+  @override
+  Future<String?> bluetoothPair(String id) async {
+    _padState = 'pairing';
+    Timer(const Duration(milliseconds: 800), () => _padState = 'paired');
+    return null;
+  }
+
   final List<Profile> _seatProfiles = List.generate(kMaxSeats, (_) => builtinProfiles().first);
   final Map<String, Profile> _saved = {};
 

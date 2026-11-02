@@ -232,6 +232,16 @@ pub enum Command {
     RemoveSteamAccount {
         seat: usize,
     },
+    /// Start (`true`) or stop looking for Bluetooth controllers in pairing mode.
+    BluetoothScan {
+        on: bool,
+    },
+    /// The controllers found in pairing mode, and how pairing with each goes.
+    BluetoothDevices,
+    /// Pair with a controller `bluetooth_devices` listed. Replies at once.
+    BluetoothPair {
+        id: String,
+    },
     /// Virtual screens: whether the display driver is ready, and its one-time setup (one Windows prompt).
     VirtualScreens,
     SetupVirtualScreens,

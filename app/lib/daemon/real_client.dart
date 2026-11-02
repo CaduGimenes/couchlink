@@ -520,6 +520,19 @@ class DaemonClient extends CouchClient {
   @override
   Future<String?> removeSteamAccount(int seat) => _cmd('remove_steam_account', {'seat': seat});
 
+  @override
+  Future<({BluetoothPads? value, String? error})> bluetoothDevices() async {
+    final r = await _request('bluetooth_devices', const {});
+    if (r['ok'] != true) return (value: null, error: _errorOf(r));
+    return (value: BluetoothPads.fromJson(r), error: null);
+  }
+
+  @override
+  Future<String?> bluetoothScan(bool on) => _cmd('bluetooth_scan', {'on': on});
+
+  @override
+  Future<String?> bluetoothPair(String id) => _cmd('bluetooth_pair', {'id': id});
+
   // ---- controller profiles
 
   static String _errorOf(Map<String, dynamic> r) {

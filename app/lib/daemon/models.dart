@@ -828,6 +828,48 @@ class SteamAccounts {
       );
 }
 
+/// A controller in pairing mode, from `bluetooth_devices`.
+class BluetoothPad {
+  const BluetoothPad({required this.id, required this.name, this.kind = '', this.state = 'found', this.error});
+  final String id;
+  final String name;
+
+  /// "PlayStation 4", "PlayStation 5", "Xbox", "Switch" or empty when the name does not say.
+  final String kind;
+
+  /// `found`, `pairing`, `paired` or `failed`.
+  final String state;
+  final String? error;
+
+  factory BluetoothPad.fromJson(Map<String, dynamic> j) => BluetoothPad(
+        id: _str(j['id']),
+        name: _str(j['name']),
+        kind: _str(j['kind']),
+        state: _str(j['state'], 'found'),
+        error: j['error'] is String ? j['error'] as String : null,
+      );
+}
+
+/// The `bluetooth_devices` answer.
+class BluetoothPads {
+  const BluetoothPads({this.available = false, this.scanning = false, this.devices = const []});
+
+  /// False without a Bluetooth radio, and on systems where Couchlink does not pair.
+  final bool available;
+  final bool scanning;
+  final List<BluetoothPad> devices;
+
+  factory BluetoothPads.fromJson(Map<String, dynamic> j) => BluetoothPads(
+        available: j['available'] == true,
+        scanning: j['scanning'] == true,
+        devices: [
+          if (j['devices'] is List)
+            for (final x in j['devices'] as List)
+              if (x is Map) BluetoothPad.fromJson(x.cast<String, dynamic>()),
+        ],
+      );
+}
+
 /// What couchlinkd knows about a newer Couchlink (`update` events).
 class UpdateInfo {
   const UpdateInfo({required this.current, this.latest, this.page, this.checking = false, this.installing = false, this.restarting = false, this.error});

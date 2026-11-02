@@ -13,6 +13,7 @@ import 'app_state.dart';
 import 'icons.dart';
 import 'kit.dart';
 import 'shell.dart';
+import 'pair_dialog.dart';
 import 'steam_account_dialog.dart';
 import 'status.dart';
 
@@ -172,6 +173,7 @@ class _DevicesRow extends StatelessWidget {
       runSpacing: 10,
       children: [
         for (final d in visibleDevices(state)) _DeviceChip(key: ValueKey('device-${d.id}'), device: d, seat: state.seatOfDevice(d.id), breath: breath),
+        const PairTile(),
       ],
     );
   }
