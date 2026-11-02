@@ -121,6 +121,7 @@ class _PlayersViewState extends State<PlayersView> with SingleTickerProviderStat
                 runSpacing: gap,
                 children: [
                   for (var i = 0; i < shownSeats(st); i++) SizedBox(width: w, height: 340, child: _SeatSlot(index: i, state: st, pulse: _pulse[i])),
+                  if (hiddenSeats(st) > 0) SizedBox(width: box.maxWidth, child: _MoreSeats(from: shownSeats(st), count: hiddenSeats(st))),
                 ],
               );
             }),
@@ -145,6 +146,12 @@ int shownSeats(DaemonState st) {
   final all = st.seats.length < kMaxSeats ? st.seats.length : kMaxSeats;
   final busy = st.takenSeats.length >= 4 || st.takenSeats.any((i) => i >= 4);
   return busy ? all : (all < 4 ? all : 4);
+}
+
+/// Seats that exist but are not shown yet (they appear once the first four are taken).
+int hiddenSeats(DaemonState st) {
+  final all = st.seats.length < kMaxSeats ? st.seats.length : kMaxSeats;
+  return all - shownSeats(st);
 }
 
 /// The devices to show. The shared "Keyboard and mouse" (`kbm:system`) stands for the PC's keyboard and mouse
@@ -371,6 +378,50 @@ class _EmptySeat extends StatelessWidget {
             Text('Seat ${index + 1} is free', style: txt(context, size: 13, weight: FontWeight.w700, color: c.ink2)),
             const SizedBox(height: 2),
             Text('Press a button to sit here', style: txt(context, size: 12, color: c.ink3)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Under the first four seats: the seats that open once those are taken, so a group of more than four knows they are
+/// there.
+class _MoreSeats extends StatelessWidget {
+  const _MoreSeats({required this.from, required this.count});
+
+  final int from;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return CustomPaint(
+      key: const ValueKey('more-seats'),
+      painter: DashedRRectPainter(color: c.hairStrong, radius: 14),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            for (var i = from; i < from + count; i++)
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: CustomPaint(
+                    painter: DashedCirclePainter(color: c.hairStrong),
+                    child: Center(child: Text('${i + 1}', style: txt(context, size: 12, weight: FontWeight.w700, color: c.seat[i], height: 1.1))),
+                  ),
+                ),
+              ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                t('{count} more seats open once seats 1 to {from} are taken: up to {total} players', {'count': count, 'from': from, 'total': from + count}),
+                style: txt(context, size: 12.5, color: c.ink3),
+              ),
+            ),
           ],
         ),
       ),

@@ -19,6 +19,22 @@ void main() {
     expect(ids(DaemonState(devices: [d('kbm:system', seat: 0), d('kbd:1')])), ['kbm:system', 'kbd:1'], reason: 'someone sits with it');
   });
 
+  test('seats 5 to 8 are hinted at until the first four are taken', () {
+    Seat s(String name) => Seat(name: name, color: const Color(0xFF000000), devices: const []);
+    final seats = <Seat?>[s('A'), null, null, null, null, null, null, null];
+    expect(shownSeats(DaemonState(seats: seats)), 4);
+    expect(hiddenSeats(DaemonState(seats: seats)), 4, reason: 'four more open later');
+    final full = <Seat?>[s('A'), s('B'), s('C'), s('D'), null, null, null, null];
+    expect(shownSeats(DaemonState(seats: full)), 8);
+    expect(hiddenSeats(DaemonState(seats: full)), 0, reason: 'all eight show, no hint');
+  });
+
+  testWidgets('the hint under the seats says more players can join', (tester) async {
+    await pumpApp(tester, newFake(), size: const Size(1400, 1100));
+    expect(byKey('more-seats'), findsOneWidget);
+    expect(find.text('4 more seats open once seats 1 to 4 are taken: up to 8 players'), findsOneWidget);
+  });
+
   testWidgets("player 1's Steam: open it, pick its folder, and go back to the one Couchlink finds", (tester) async {
     final fake = newFake();
     await pumpApp(tester, fake, size: const Size(1400, 1100));

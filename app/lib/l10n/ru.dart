@@ -205,6 +205,7 @@ const Map<String, String> ruStrings = {
   'found on this PC': 'найдены на этом ПК',
   'Seats': 'Места',
   '{length} of {shownSeats} taken': 'занято {length} из {shownSeats}',
+  '{count} more seats open once seats 1 to {from} are taken: up to {total} players': 'Ещё {count} места откроются, когда места с 1 по {from} будут заняты: до {total} игроков',
   'Keyboard and mouse can take a seat too. Couchlink gives each copy of the game only its own devices, so nobody steers someone else.': 'Клавиатура и мышь тоже могут занять место. Couchlink даёт каждой копии игры только её устройства, чтобы никто не управлял чужим игроком.',
   'Player {seat_1}': 'Игрок {seat_1}',
   'Click to join': 'Нажмите, чтобы сесть',
