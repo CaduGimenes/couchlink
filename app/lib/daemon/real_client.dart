@@ -512,6 +512,12 @@ class DaemonClient extends CouchClient {
   Future<String?> addToSteam(String recipe) => _cmd('add_to_steam', {'recipe': recipe});
 
   @override
+  Future<String?> openOwnerSteam() => _cmd('open_owner_steam', const {});
+
+  @override
+  Future<String?> setSteamFolder(String? folder) => _cmd('set_steam_folder', {'folder': folder});
+
+  @override
   Future<String?> closeSteamAccount(int seat) => _cmd('close_steam_account', {'seat': seat});
 
   @override

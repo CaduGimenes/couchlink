@@ -475,7 +475,12 @@ impl Registry {
         let seat = self.seats.iter_mut().find(|s| s.id == target).expect("target seat checked above");
         let idx = seat.devices.iter().position(|d| d == device).unwrap_or(0) as u8;
         match input {
-            Input::Key { vk, scan, flags } => seat.feed.push_key(idx, vk, scan, flags),
+            Input::Key { vk, scan, flags } => {
+                // Shift+Tab from the host opens Steam's overlay in the copy it controls, as from the player's own keys.
+                let copy = seat.pids.first().copied().unwrap_or_else(|| seat.feed.hook_pid());
+                overlay_key(&mut self.overlay_shift, seat.id, copy, vk, flags);
+                seat.feed.push_key(idx, vk, scan, flags)
+            }
             Input::Mouse { dx, dy, flags, wheel } => {
                 if dx != 0 || dy != 0 || flags != 0 {
                     seat.feed.push_mouse(idx, dx, dy, flags, wheel)

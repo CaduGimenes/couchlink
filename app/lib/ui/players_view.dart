@@ -408,8 +408,24 @@ class _SeatCardState extends State<_SeatCard> with SingleTickerProviderStateMixi
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               SeatBadge(number: i + 1, color: color),
-              if (!feedback)
+              const Spacer(),
+              // Every player's Steam: player 1 plays on yours, the others may play on their own account.
+              Tooltip(
+                message: i == 0
+                    ? t('{name} plays on your Steam: open it, or pick its folder', {'name': seat.name})
+                    : t('Let {name} play on their own Steam account instead of yours', {'name': seat.name}),
+                waitDuration: const Duration(milliseconds: 400),
+                child: CButton(
+                  key: ValueKey('steam-account-$i'),
+                  label: t('Steam'),
+                  small: true,
+                  onTap: feedback ? null : () => showSteamAccountDialog(context, i, seat.name),
+                ),
+              ),
+              if (!feedback) ...[
+                const SizedBox(width: 6),
                 RoundX(key: ValueKey('leave-$i'), label: t('Remove Player {i_1}', {'i_1': i + 1}), onTap: () => runCmd(context, () => scope.client.leave(i))),
+              ],
             ],
           ),
           const SizedBox(height: 14),
@@ -438,12 +454,11 @@ class _SeatCardState extends State<_SeatCard> with SingleTickerProviderStateMixi
                 ]),
               ),
           const SizedBox(height: 12),
-          if ((!allKbm && devices.isNotEmpty) || i >= 1)
+          if (!allKbm && devices.isNotEmpty)
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                if (!allKbm && devices.isNotEmpty) ...[
                 Tooltip(
                   message: t('Buzzes this controller and lights it up in {name}’s colour, so you can tell which one it is', {'name': seat.name}),
                   waitDuration: const Duration(milliseconds: 400),
@@ -468,18 +483,6 @@ class _SeatCardState extends State<_SeatCard> with SingleTickerProviderStateMixi
                   leading: CIcon(iconControls, size: 14, color: c.ink, strokeWidth: 1.8),
                   onTap: feedback ? null : () => scope.ui.openControls(i),
                 ),
-                ],
-                if (i >= 1)
-                  Tooltip(
-                    message: t('Let {name} play on their own Steam account instead of yours', {'name': seat.name}),
-                    waitDuration: const Duration(milliseconds: 400),
-                    child: CButton(
-                      key: ValueKey('steam-account-$i'),
-                      label: t('Steam'),
-                      small: true,
-                      onTap: feedback ? null : () => showSteamAccountDialog(context, i, seat.name),
-                    ),
-                  ),
               ],
             ),
           const Spacer(),

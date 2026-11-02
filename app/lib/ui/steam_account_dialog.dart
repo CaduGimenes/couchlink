@@ -9,9 +9,126 @@ import '../theme/tokens.dart';
 import 'app_state.dart';
 import 'kit.dart';
 
-/// Seat 2 and up: play on your own Steam account, or on the PC owner's (the default).
+/// Seat 2 and up: play on your own Steam account, or on the PC owner's (the default). Seat 1: the PC owner's Steam.
 Future<void> showSteamAccountDialog(BuildContext context, int seat, String player) {
+  if (seat == 0) return showDialog<void>(context: context, builder: (_) => _OwnerSteamDialog(player: player));
   return showDialog<void>(context: context, builder: (_) => _SteamAccountDialog(seat: seat, player: player));
+}
+
+/// Player 1 plays on the Steam of the person at the PC: whether it runs, opening it, and the Steam folder Couchlink
+/// uses (picked by hand when Couchlink finds the wrong one or none).
+class _OwnerSteamDialog extends StatefulWidget {
+  const _OwnerSteamDialog({required this.player});
+  final String player;
+
+  @override
+  State<_OwnerSteamDialog> createState() => _OwnerSteamDialogState();
+}
+
+class _OwnerSteamDialogState extends State<_OwnerSteamDialog> {
+  OwnerSteam? _owner;
+  String? _error;
+  Timer? _poll;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final r = await Scope.of(context).client.steamAccounts();
+    if (!mounted) return;
+    setState(() {
+      _owner = r.value?.owner;
+      _error = r.error;
+    });
+    if (_owner?.ready ?? false) _poll?.cancel();
+  }
+
+  Future<void> _open() async {
+    final err = await Scope.of(context).client.openOwnerSteam();
+    if (!mounted) return;
+    if (err != null) {
+      setState(() => _error = err);
+      return;
+    }
+    _poll?.cancel();
+    var tries = 0;
+    _poll = Timer.periodic(const Duration(seconds: 2), (t) {
+      if (++tries > 30) t.cancel();
+      _load();
+    });
+    await _load();
+  }
+
+  Future<void> _setFolder(String? folder) async {
+    final err = await Scope.of(context).client.setSteamFolder(folder);
+    if (!mounted) return;
+    setState(() => _error = err);
+    await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final scope = Scope.of(context);
+    final o = _owner;
+    final body = <Widget>[
+      Text(t('{name} plays on your Steam account. Couchlink opens your Steam by itself when a game needs it.', {'name': widget.player}),
+          style: txt(context, size: 13, color: c.ink2, height: 1.4)),
+      const SizedBox(height: 8),
+      if (o == null && _error == null)
+        Text(t('Checking…'), style: txt(context, size: 12, color: c.ink3))
+      else if (o != null) ...[
+        Text(o.ready ? t('Your Steam is running.') : t('Your Steam is not running.'), key: const ValueKey('owner-steam-state'), style: txt(context, size: 12, color: c.ink3)),
+        const SizedBox(height: 14),
+        Text(t('Steam folder'), style: txt(context, size: 12, weight: FontWeight.w600, color: c.ink2)),
+        const SizedBox(height: 4),
+        SelectableText(o.folder ?? t('Not found'), key: const ValueKey('owner-steam-folder'), style: txt(context, size: 12, color: c.ink2, height: 1.4)),
+        const SizedBox(height: 4),
+        Text(o.picked ? t('You picked this folder.') : t('Couchlink found this folder. Pick another if your Steam is somewhere else.'),
+            style: txt(context, size: 11.5, color: c.ink3, height: 1.35)),
+      ],
+      if (_error != null) ...[const SizedBox(height: 10), Text(_error!, style: txt(context, size: 12.5, color: c.danger))],
+    ];
+    return Dialog(
+      backgroundColor: c.window,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18), side: BorderSide(color: c.hairStrong)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 460, maxHeight: 620),
+        child: Padding(
+          padding: const EdgeInsets.all(22),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(t('{name}’s Steam', {'name': widget.player}), style: txt(context, size: 17, weight: FontWeight.w700)),
+            const SizedBox(height: 12),
+            Flexible(child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: body))),
+            const SizedBox(height: 16),
+            Wrap(alignment: WrapAlignment.end, spacing: 8, runSpacing: 8, children: [
+              if (o != null && o.picked) CButton(key: const ValueKey('owner-steam-auto'), label: t('Find it by itself'), small: true, onTap: () => _setFolder(null)),
+              CButton(
+                key: const ValueKey('owner-steam-pick'),
+                label: t('Pick Steam folder'),
+                small: true,
+                onTap: () async {
+                  final folder = await scope.ui.pickFolder();
+                  if (folder != null) await _setFolder(folder);
+                },
+              ),
+              if (o != null && !o.ready) CButton(key: const ValueKey('owner-steam-open'), label: t('Open Steam'), small: true, primary: true, onTap: _open),
+              CButton(key: const ValueKey('steam-close'), label: t('Close'), small: true, onTap: () => Navigator.of(context).pop()),
+            ]),
+          ]),
+        ),
+      ),
+    );
+  }
 }
 
 class _SteamAccountDialog extends StatefulWidget {

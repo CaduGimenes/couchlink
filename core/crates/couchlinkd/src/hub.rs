@@ -193,6 +193,7 @@ impl Hub {
                 session::rawkbm::set_show_cursors(m.show_cursors());
                 m.set_only_in_front(settings["only_in_front"].as_bool().unwrap_or(true));
                 session::rawkbm::set_only_in_front(m.only_in_front());
+                couchlink_steam::library::set_steam_folder(settings["steam_folder"].as_str().map(std::path::PathBuf::from));
                 m
             },
             hotkey: crate::hotkey::spawn(self_tx.clone()),
@@ -780,7 +781,27 @@ impl Hub {
             Command::SteamAccounts => {
                 let mut list = crate::accounts::list();
                 list["close_on_end"] = json!(steam_close_on_end());
+                list["owner"] = crate::accounts::owner();
                 Ok(list)
+            }
+            Command::OpenOwnerSteam => crate::accounts::open_owner().map(|_| none),
+            Command::SetSteamFolder { folder } => {
+                let folder = folder.map(|f| f.trim().to_string()).filter(|f| !f.is_empty());
+                if let Some(f) = &folder {
+                    let path = std::path::Path::new(f);
+                    // The program or the folder may be picked; the folder is what counts.
+                    let dir = if path.is_file() { path.parent().unwrap_or(path) } else { path };
+                    if !couchlink_steam::library::is_steam_folder(dir) {
+                        return Err(format!("{} is not a Steam folder (it has no steamapps folder)", dir.display()));
+                    }
+                    save_setting("steam_folder", json!(dir.display().to_string()));
+                    couchlink_steam::library::set_steam_folder(Some(dir.to_path_buf()));
+                } else {
+                    save_setting("steam_folder", serde_json::Value::Null);
+                    couchlink_steam::library::set_steam_folder(None);
+                }
+                self.broadcast(&Event::GamesChanged);
+                Ok(crate::accounts::owner())
             }
             Command::CloseSteamAccount { seat } => crate::accounts::close(seat).map(|_| none),
             Command::SetSteamCloseOnEnd { on } => {

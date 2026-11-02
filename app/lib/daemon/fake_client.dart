@@ -328,7 +328,7 @@ class FakeClient extends CouchClient {
 
   @override
   Future<({SteamAccounts? value, String? error})> steamAccounts() async => (
-        value: SteamAccounts(closeOnEnd: _steamCloseOnEnd, accounts: [
+        value: SteamAccounts(closeOnEnd: _steamCloseOnEnd, owner: OwnerSteam(folder: steamFolder, picked: steamFolderPicked, ready: ownerSteamRunning), accounts: [
           for (var i = 1; i < kMaxSeats; i++) SteamAccount(seat: i, ready: _ownSteam.contains(i), running: _steamRunning.contains(i), plan: _plan),
         ]),
         error: null,
@@ -366,6 +366,25 @@ class FakeClient extends CouchClient {
   @override
   Future<String?> addToSteam(String recipe) async {
     addedToSteam.add(recipe);
+    return null;
+  }
+
+  /// Player 1's Steam (fake): its folder and whether it runs.
+  String? steamFolder = 'C:/Program Files (x86)/Steam';
+  bool steamFolderPicked = false;
+  bool ownerSteamRunning = false;
+
+  @override
+  Future<String?> openOwnerSteam() async {
+    ownerSteamRunning = true;
+    return null;
+  }
+
+  @override
+  Future<String?> setSteamFolder(String? folder) async {
+    if (folder != null && !folder.toLowerCase().contains('steam')) return '$folder is not a Steam folder (it has no steamapps folder)';
+    steamFolder = folder ?? 'C:/Program Files (x86)/Steam';
+    steamFolderPicked = folder != null;
     return null;
   }
 

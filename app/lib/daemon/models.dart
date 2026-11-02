@@ -808,7 +808,7 @@ class SteamAccount {
 
 /// The `steam_accounts` answer.
 class SteamAccounts {
-  const SteamAccounts({this.accounts = const [], this.steam = true, this.closeOnEnd = false});
+  const SteamAccounts({this.accounts = const [], this.steam = true, this.closeOnEnd = false, this.owner = const OwnerSteam()});
   final List<SteamAccount> accounts;
 
   /// False when Steam is not installed on this PC.
@@ -816,6 +816,9 @@ class SteamAccounts {
 
   /// Every seat's own Steam is closed when a session ends (Settings).
   final bool closeOnEnd;
+
+  /// Player 1's Steam: the PC owner's.
+  final OwnerSteam owner;
 
   factory SteamAccounts.fromJson(Map<String, dynamic> j) => SteamAccounts(
         accounts: [
@@ -825,7 +828,24 @@ class SteamAccounts {
         ],
         steam: j['steam'] != false,
         closeOnEnd: j['close_on_end'] == true,
+        owner: j['owner'] is Map ? OwnerSteam.fromJson((j['owner'] as Map).cast<String, dynamic>()) : const OwnerSteam(),
       );
+}
+
+/// Player 1's Steam (the PC owner's), from `steam_accounts`.
+class OwnerSteam {
+  const OwnerSteam({this.folder, this.picked = false, this.ready = false});
+
+  /// The Steam folder Couchlink uses, or null when it found none.
+  final String? folder;
+
+  /// The folder was picked by hand.
+  final bool picked;
+
+  /// Steam runs with someone signed in.
+  final bool ready;
+
+  factory OwnerSteam.fromJson(Map<String, dynamic> j) => OwnerSteam(folder: j['folder'] as String?, picked: j['picked'] == true, ready: j['ready'] == true);
 }
 
 /// What couchlinkd knows about a newer Couchlink (`update` events).

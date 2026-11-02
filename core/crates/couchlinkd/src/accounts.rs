@@ -69,6 +69,28 @@ pub fn open(seat: usize) -> Result<(), String> {
     couchlink_steam::accounts_start_steam_logged(&cfg, true, Some(&log)).map(|_| ()).map_err(|e| e.user_message())
 }
 
+/// Player 1's Steam (the PC owner's): its folder, whether that was picked by hand, and whether it runs signed in.
+pub fn owner() -> Value {
+    let folder = couchlink_steam::steam_root();
+    json!({
+        "folder": folder.as_ref().map(|f| f.display().to_string()),
+        "picked": load_picked(),
+        "ready": couchlink_steam::owner::owner_steam_ready(),
+    })
+}
+
+/// True when the Steam folder was picked by hand (settings.json `steam_folder`).
+fn load_picked() -> bool {
+    let file = paths::state_dir().join("settings.json");
+    std::fs::read_to_string(file).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).is_some_and(|v| v["steam_folder"].is_string())
+}
+
+/// Starts player 1's Steam (the PC owner's) to the tray.
+pub fn open_owner() -> Result<(), String> {
+    crate::logfile::write("info", "starting your Steam for player 1");
+    couchlink_steam::owner::start_owner_steam().map_err(|e| format!("cannot start Steam: {e}"))
+}
+
 /// Closes the seat's own Steam, as its Exit menu does.
 pub fn close(seat: usize) -> Result<(), String> {
     let cfg = config(seat)?;

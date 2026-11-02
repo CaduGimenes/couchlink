@@ -198,6 +198,14 @@ pub enum Command {
     OpenSteamAccount {
         seat: usize,
     },
+    /// Starts the PC owner's Steam (player 1's), to the tray.
+    OpenOwnerSteam,
+    /// The Steam folder to use for player 1 and the game library (the folder or its steam.exe), or null to find it
+    /// again by itself.
+    SetSteamFolder {
+        #[serde(default)]
+        folder: Option<String>,
+    },
     /// Whether a game needs Steam: `needed`, `not_needed`, or null for automatic.
     SetGameSteam {
         recipe: String,

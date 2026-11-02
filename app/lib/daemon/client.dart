@@ -213,6 +213,12 @@ abstract class CouchClient extends ChangeNotifier {
   /// `open_steam_account`: starts that seat's own Steam.
   Future<String?> openSteamAccount(int seat);
 
+  /// `open_owner_steam`: starts player 1's Steam (the PC owner's), to the tray.
+  Future<String?> openOwnerSteam();
+
+  /// `set_steam_folder`: the Steam folder to use (the folder or its steam.exe), null to find it again. Null or an error.
+  Future<String?> setSteamFolder(String? folder);
+
   /// `close_steam_account`: closes that seat's own Steam, as its Exit menu does.
   Future<String?> closeSteamAccount(int seat);
 

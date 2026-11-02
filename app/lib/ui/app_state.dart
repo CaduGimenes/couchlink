@@ -42,6 +42,9 @@ class UiState extends ChangeNotifier {
   /// Picking a game's program for Add a game; tests replace it.
   PickGame pickGame = pickGameWithDialog;
 
+  /// Picking a folder (player 1's Steam folder); tests replace it.
+  PickFolder pickFolder = pickFolderWithDialog;
+
   void go(AppView v) {
     if (v == view && sheetGameId == null && controlsSeat == null) return;
     controlsSeat = null;

@@ -19,10 +19,34 @@ void main() {
     expect(ids(DaemonState(devices: [d('kbm:system', seat: 0), d('kbd:1')])), ['kbm:system', 'kbd:1'], reason: 'someone sits with it');
   });
 
-  testWidgets('seat 2 can get its own Steam account and go back to yours; seat 1 cannot', (tester) async {
+  testWidgets("player 1's Steam: open it, pick its folder, and go back to the one Couchlink finds", (tester) async {
     final fake = newFake();
     await pumpApp(tester, fake, size: const Size(1400, 1100));
-    expect(byKey('steam-account-0'), findsNothing, reason: "seat 1 always plays on the PC owner's account");
+    await tester.tap(byKey('steam-account-0'));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(byKey('steam-setup'), findsNothing, reason: "player 1 always plays on the PC owner's account");
+    expect(find.text('Your Steam is not running.'), findsOneWidget);
+    await tester.tap(byKey('owner-steam-open'));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Your Steam is running.'), findsOneWidget);
+    expect(fake.ownerSteamRunning, isTrue);
+
+    Scope.of(tester.element(byKey('owner-steam-pick'))).ui.pickFolder = () async => 'D:/Games/Steam';
+    await tester.tap(byKey('owner-steam-pick'));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(fake.steamFolder, 'D:/Games/Steam');
+    expect(find.text('D:/Games/Steam'), findsOneWidget);
+    await tester.tap(byKey('owner-steam-auto'));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(fake.steamFolderPicked, isFalse);
+    await tester.tap(byKey('steam-close'));
+    await tester.pump(const Duration(milliseconds: 500));
+  });
+
+  testWidgets('seat 2 can get its own Steam account and go back to yours', (tester) async {
+    final fake = newFake();
+    await pumpApp(tester, fake, size: const Size(1400, 1100));
     await tester.tap(byKey('steam-account-1'));
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pump(const Duration(milliseconds: 500));

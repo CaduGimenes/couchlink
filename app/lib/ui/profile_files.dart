@@ -42,6 +42,11 @@ Future<String?> pickGameWithDialog({String? folder, String? confirm}) async {
   return file?.path;
 }
 
+/// Lets the player pick a folder; its path, or null when cancelled.
+typedef PickFolder = Future<String?> Function();
+
+Future<String?> pickFolderWithDialog() => getDirectoryPath(confirmButtonText: t('Use this folder'));
+
 /// A file name for an exported profile: "Fallout New Vegas.couchlink-profile".
 String profileFileName(String profileName) {
   final clean = profileName.replaceAll(RegExp(r'[\/:*?"<>|]+'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();

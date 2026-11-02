@@ -12,9 +12,26 @@ pub struct InstalledApp {
     pub install_dir: PathBuf,
 }
 
-/// The Steam install folder: `HKCU\Software\Valve\Steam` `SteamPath`, then the default
+static STEAM_FOLDER: std::sync::RwLock<Option<PathBuf>> = std::sync::RwLock::new(None);
+
+/// The Steam folder the player picked, used before the one Couchlink finds itself; `None` goes back to finding it.
+pub fn set_steam_folder(folder: Option<PathBuf>) {
+    *STEAM_FOLDER.write().unwrap_or_else(|e| e.into_inner()) = folder;
+}
+
+/// True when `folder` holds a Steam install (its `steamapps`).
+pub fn is_steam_folder(folder: &Path) -> bool {
+    folder.join("steamapps").is_dir()
+}
+
+/// The Steam install folder: the one the player picked ([`set_steam_folder`]), else `HKCU\Software\Valve\Steam`
+/// `SteamPath`, then the default
 /// `Program Files (x86)\Steam` (Windows) or `~/.steam/steam` / `~/.local/share/Steam` (Linux).
 pub fn steam_root() -> Option<PathBuf> {
+    // The folder the player picked (Players, player 1's Steam) wins when Steam is there.
+    if let Some(p) = STEAM_FOLDER.read().unwrap_or_else(|e| e.into_inner()).clone().filter(|p| p.join("steamapps").is_dir()) {
+        return Some(p);
+    }
     let mut candidates: Vec<PathBuf> = Vec::new();
     #[cfg(windows)]
     {
