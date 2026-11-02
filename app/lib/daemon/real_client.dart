@@ -353,6 +353,12 @@ class DaemonClient extends CouchClient {
   Future<String?> rename(int seat, String name) => _cmd('rename', {'seat': seat, 'name': name});
   @override
   Future<String?> identify(int seat) => _cmd('identify', {'seat': seat});
+
+  @override
+  Future<String?> disconnectDevice(String device) => _cmd('disconnect_device', {'device': device});
+
+  @override
+  Future<String?> setTurnOffPad(String pad) => _cmd('set_turn_off_pad', {'pad': pad});
   @override
   Future<String?> setLayout(String layout) => _cmd('set_layout', {'layout': layout});
   @override

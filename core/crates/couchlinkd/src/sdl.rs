@@ -42,6 +42,8 @@ pub struct PadInfo {
     pub connection: Connection,
     pub battery: Option<u8>,
     pub charging: bool,
+    /// Wireless, and the platform can turn it off (`poweroff.rs`).
+    pub can_turn_off: bool,
     pub is_virtual: bool,
 }
 
@@ -50,6 +52,13 @@ static STOP_PAD: std::sync::Mutex<Option<[Button; 2]>> = std::sync::Mutex::new(N
 
 pub fn set_stop_pad(buttons: Option<[Button; 2]>) {
     *STOP_PAD.lock().unwrap_or_else(|e| e.into_inner()) = buttons;
+}
+
+/// The turn-a-controller-off pad buttons (`couchlink_core::shortcut`), or none; the SDL thread watches every pad for them.
+static TURN_OFF_PAD: std::sync::Mutex<Option<[Button; 2]>> = std::sync::Mutex::new(None);
+
+pub fn set_turn_off_pad(buttons: Option<[Button; 2]>) {
+    *TURN_OFF_PAD.lock().unwrap_or_else(|e| e.into_inner()) = buttons;
 }
 
 #[derive(Debug)]
@@ -62,6 +71,8 @@ pub enum SdlEvent {
     Input(Vec<(u32, InputSample)>),
     /// The close-the-games pad buttons were held together long enough on some pad.
     StopCombo,
+    /// The turn-off pad buttons were held together long enough on this pad.
+    TurnOffCombo(u32),
 }
 
 #[derive(Debug)]
@@ -181,6 +192,8 @@ struct Worker {
     refresh_displays: bool,
     /// When each pad started holding the close-the-games buttons, and whether that hold already fired.
     combo_since: HashMap<u32, (Instant, bool)>,
+    /// The same for the turn-a-controller-off buttons.
+    off_since: HashMap<u32, (Instant, bool)>,
 }
 
 impl Worker {
@@ -221,6 +234,7 @@ impl Worker {
             #[cfg(not(windows))]
             refresh_displays: true,
             combo_since: HashMap::new(),
+            off_since: HashMap::new(),
         };
         for n in 0..virtual_pads {
             w.attach_virtual(n + 1)?;
@@ -291,6 +305,7 @@ impl Worker {
             if now >= next_combo {
                 next_combo = now + COMBO_PERIOD;
                 self.watch_stop_combo(now);
+                self.watch_turn_off_combo(now);
             }
             if now >= next_power {
                 next_power = now + POWER_PERIOD;
@@ -408,6 +423,8 @@ impl Worker {
                 if self.pads.remove(&id).is_some() {
                     crate::session::hook::set_xinput_slot(id, None);
                     crate::session::hook::set_pad_path(id, None);
+                    crate::poweroff::register(id, None);
+                    self.off_since.remove(&id);
                     crate::session::padfeed::disconnect(&format!("pad:{id}"));
                     self.batteries.remove(&id);
                     let _ = self.events.send(SdlEvent::PadRemoved(id));
@@ -439,22 +456,26 @@ impl Worker {
             return;
         }
         let (battery, charging) = battery_of(&pad);
+        let connection = match pad.connection_state() {
+            Ok(ConnectionState::Wired) => Connection::Usb,
+            Ok(ConnectionState::Wireless) => Connection::Wireless,
+            _ => Connection::Unknown,
+        };
         let is_virtual = self.virtuals.contains_key(&id);
         // Virtual pads share one mapping name, so ask the joystick layer for theirs.
         let name = if is_virtual { joystick_name(id) } else { None }
             .or_else(|| pad.name())
             .unwrap_or_else(|| "Controller".to_string());
+        let target = if is_virtual { None } else { crate::poweroff::target_for(connection, pad.path().as_deref(), pad.serial_number().as_deref()) };
+        crate::poweroff::register(id, target);
         let info = PadInfo {
             id,
             name,
             family: family_of(&pad),
-            connection: match pad.connection_state() {
-                Ok(ConnectionState::Wired) => Connection::Usb,
-                Ok(ConnectionState::Wireless) => Connection::Wireless,
-                _ => Connection::Unknown,
-            },
+            connection,
             battery,
             charging,
+            can_turn_off: target.is_some(),
             is_virtual,
         };
         self.batteries.insert(id, (battery, charging));
@@ -518,6 +539,26 @@ impl Worker {
                 }
             } else {
                 self.combo_since.remove(&id);
+            }
+        }
+    }
+
+    /// Turn a controller off when it holds the turn-off buttons together for `TURN_OFF_HOLD_MS`; once per hold.
+    fn watch_turn_off_combo(&mut self, now: Instant) {
+        let Some(combo) = *TURN_OFF_PAD.lock().unwrap_or_else(|e| e.into_inner()) else {
+            self.off_since.clear();
+            return;
+        };
+        let hold = Duration::from_millis(couchlink_core::shortcut::TURN_OFF_HOLD_MS);
+        for (id, sample) in self.read_pads() {
+            if combo.iter().all(|b| sample.buttons.contains(b)) && crate::poweroff::can(id) {
+                let (since, fired) = self.off_since.entry(id).or_insert((now, false));
+                if !*fired && now.duration_since(*since) >= hold {
+                    *fired = true;
+                    let _ = self.events.send(SdlEvent::TurnOffCombo(id));
+                }
+            } else {
+                self.off_since.remove(&id);
             }
         }
     }

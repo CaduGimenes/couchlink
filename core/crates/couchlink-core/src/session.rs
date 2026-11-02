@@ -272,6 +272,7 @@ mod tests {
             fps_limit: 0,
             stop_keys: String::new(),
             stop_pad: String::new(),
+            turn_off_pad: String::new(),
             front_keys: String::new(),
             hide_keys: String::new(),
             host_control: false,

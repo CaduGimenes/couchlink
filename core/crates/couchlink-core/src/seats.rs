@@ -293,6 +293,7 @@ mod tests {
             connection: Connection::Usb,
             battery: None,
             charging: false,
+            can_turn_off: false,
             seat: None,
         }
     }
@@ -306,6 +307,7 @@ mod tests {
             connection: Connection::Usb,
             battery: None,
             charging: false,
+            can_turn_off: false,
             seat: None,
         }
     }
@@ -319,6 +321,7 @@ mod tests {
             connection: Connection::Usb,
             battery: None,
             charging: false,
+            can_turn_off: false,
             seat: None,
         }
     }

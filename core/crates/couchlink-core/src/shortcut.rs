@@ -14,6 +14,10 @@ pub const DEFAULT_CONTROL_KEYS: &str = "Ctrl+Shift+K";
 pub const PAD_CHOICES: [&str; 4] = ["guide+back", "guide+start", "back+start", "off"];
 /// How long the pad buttons are held together before the games close.
 pub const PAD_HOLD_MS: u64 = 1500;
+/// The turn-a-controller-off pad buttons are off until the player picks some.
+pub const DEFAULT_TURN_OFF_PAD: &str = "off";
+/// How long the turn-off buttons are held together on a controller before it turns off.
+pub const TURN_OFF_HOLD_MS: u64 = 2000;
 
 /// A key with its modifiers, like `Ctrl+Shift+Q`.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -186,6 +186,7 @@ impl Hub {
                 let settings = load_settings();
                 let _ = m.set_fps_limit(settings["fps_limit"].as_u64().map_or(0, |f| f as u32));
                 let _ = m.set_stop_shortcut(settings["stop_keys"].as_str(), settings["stop_pad"].as_str());
+                let _ = m.set_turn_off_pad(settings["turn_off_pad"].as_str().unwrap_or("off"));
                 let _ = m.set_window_keys(settings["front_keys"].as_str(), settings["hide_keys"].as_str());
                 let _ = m.set_host_control(settings["host_control"].as_bool(), settings["control_keys"].as_str());
                 session::rawkbm::set_host_control(m.host_control());
@@ -234,6 +235,7 @@ impl Hub {
             }
         }
         crate::sdl::set_stop_pad(couchlink_core::shortcut::pad_buttons(self.model.stop_pad()).ok().flatten());
+        crate::sdl::set_turn_off_pad(couchlink_core::shortcut::pad_buttons(self.model.turn_off_pad()).ok().flatten());
     }
 
     fn update_json(&self, error: Option<String>, restarting: bool) -> String {
@@ -266,6 +268,14 @@ impl Hub {
         tokio::task::spawn_blocking(move || {
             let _ = tx.send(HubMsg::UpdateChecked(crate::update::check()));
         });
+    }
+
+    /// Turn a controller off (Bluetooth disconnect or Xbox power off); its removal then arrives as an SDL event.
+    fn turn_off_pad(&mut self, id: u32) -> Result<(), String> {
+        let name = self.model.seats.device(&format!("pad:{id}")).map(|d| d.name.clone()).unwrap_or_else(|| "Controller".to_string());
+        crate::poweroff::turn_off(id)?;
+        self.log(LogLevel::Info, format!("Turned off {name}"));
+        Ok(())
     }
 
     /// The shortcut was pressed: close the games and put the desktop back, when a session runs.
@@ -662,6 +672,19 @@ impl Hub {
                 }
                 Ok(none)
             }
+            Command::SetTurnOffPad { pad } => {
+                if self.model.set_turn_off_pad(&pad)? {
+                    save_setting("turn_off_pad", json!(self.model.turn_off_pad()));
+                    self.apply_shortcut();
+                    self.changed();
+                }
+                Ok(none)
+            }
+            Command::DisconnectDevice { device } => {
+                let id = pad_number(&device).ok_or_else(|| "Only controllers can be turned off".to_string())?;
+                self.turn_off_pad(id)?;
+                Ok(none)
+            }
             Command::SetLayout { layout } => {
                 if self.model.set_layout(layout) {
                     self.changed();
@@ -1048,6 +1071,11 @@ player {}: {}", s.seat + 1, s.error.as_deref().unwrap_or_default());
             }
             SdlEvent::Input(samples) => self.input_samples(samples),
             SdlEvent::StopCombo => self.stop_shortcut(),
+            SdlEvent::TurnOffCombo(id) => {
+                if let Err(e) = self.turn_off_pad(id) {
+                    self.log(LogLevel::Warn, e);
+                }
+            }
         }
     }
 
@@ -1062,6 +1090,7 @@ player {}: {}", s.seat + 1, s.error.as_deref().unwrap_or_default());
                     connection: Connection::Unknown,
                     battery: None,
                     charging: false,
+                    can_turn_off: false,
                     seat: None,
                 });
                 self.log(LogLevel::Info, format!("{} connected: {}", if d.kind == RawKind::Keyboard { "Keyboard" } else { "Mouse" }, d.name));
@@ -1094,6 +1123,7 @@ player {}: {}", s.seat + 1, s.error.as_deref().unwrap_or_default());
             connection: info.connection,
             battery: info.battery,
             charging: info.charging,
+            can_turn_off: info.can_turn_off,
             seat: None,
         });
         self.apply_pad_seats();

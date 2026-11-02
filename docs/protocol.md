@@ -34,6 +34,8 @@ Daemon to client (events, no id): `{"event": "<name>", ...}`
 | `assign` | `device`, `seat` | Moves a device into a seat (creating the seat if empty, removing the device from its old seat). |
 | `rename` | `seat`, `name` (1..24 chars) | |
 | `identify` | `seat` | Rumbles the seat's gamepads for 400 ms and flashes their LED in the seat colour. Keyboards: no-op. |
+| `disconnect_device` | `device`: `pad:<n>` | Turns a wireless controller off, as holding its Home button does. Windows: a Bluetooth controller (DualShock 4, DualSense, Switch Pro, other Bluetooth HID pads) is disconnected from the Bluetooth radio with `IOCTL_BTH_DISCONNECT_DEVICE` (the address is the pad's serial number); an Xbox controller on the Xbox Wireless Adapter or a 360 receiver (an XInput pad) is powered off with `XInputPowerOffController`. Neither needs admin rights. Linux: `bluetoothctl disconnect <address>`. Error text for a wired controller, a pad Couchlink has no address for, or a keyboard. Only devices whose `can_turn_off` is true can be turned off; the controller's removal then arrives as a `state` event. |
+| `set_turn_off_pad` | `pad`: `guide+start` \| `guide+back` \| `back+start` \| `off` | Saved; default `off`. A controller that holds these two buttons for 2 seconds is turned off (as `disconnect_device`). Error text when the buttons are the ones `set_stop_shortcut` uses for closing the games (and `set_stop_shortcut` refuses the buttons chosen here). State reports it as `turn_off_pad`. |
 | `set_layout` | `layout`: `auto` \| `lr` \| `tb` \| `grid` \| `per_display` | |
 | `set_fps_limit` | `fps`: 0 (no limit) or 10 to 360 | Saved (`<state>/settings.json`); every game copy of the next session is held to it. |
 | `set_show_cursors` | `on` (bool) | Saved; default on. Couchlink draws its own arrow in the game copy of a player with a keyboard and mouse; off draws none (the game's own cursor shows). Applies to copies started afterwards. |
@@ -85,9 +87,10 @@ Daemon to client (events, no id): `{"event": "<name>", ...}`
       "connection": "wireless",
       "battery": 80,
       "charging": false,
+      "can_turn_off": true,
       "seat": 0
     },
-    { "id": "kbm:system", "kind": "kbm", "name": "Keyboard and mouse", "family": "kbm", "connection": "usb", "battery": null, "charging": false, "seat": null }
+    { "id": "kbm:system", "kind": "kbm", "name": "Keyboard and mouse", "family": "kbm", "connection": "usb", "battery": null, "charging": false, "can_turn_off": false, "seat": null }
   ],
   "seats": [
     { "name": "Player 1", "color": "#0A84FF", "devices": ["pad:7"] },
@@ -112,7 +115,7 @@ Daemon to client (events, no id): `{"event": "<name>", ...}`
 
 - `devices[].id`: `pad:<SDL joystick instance id>` for gamepads, `kbm:system` for the combined system keyboard and mouse. Ids are unique for the life of the connection.
 - `devices[].family`: `xbox` \| `playstation` \| `switch` \| `steam` \| `generic` \| `kbm`.
-- `devices[].connection`: `usb` \| `wireless` \| `unknown`. `battery`: 0..100 or null (no battery, or the pad does not say). `charging`: true while plugged in and charging; `battery` still holds the level (100 when full).
+- `devices[].connection`: `usb` \| `wireless` \| `unknown`. `battery`: 0..100 or null (no battery, or the pad does not say). `charging`: true while plugged in and charging; `battery` still holds the level (100 when full). `can_turn_off`: true when `disconnect_device` can turn the controller off (wireless, with a Bluetooth address or an XInput slot Couchlink knows).
 - `seats`: always 4 entries; `null` = free. Seat colours are fixed: `#0A84FF`, `#FF6B5B`, `#30D158`, `#FFD60A`. Default names `Player 1`..`Player 4`.
 - `displays[]`: desktop coordinates in physical pixels; `scale` is the OS content scale; `hz` the refresh rate.
 

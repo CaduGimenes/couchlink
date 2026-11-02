@@ -304,6 +304,8 @@ const Map<String, String> ruStrings = {
   'Guide + Start': 'Guide + Start',
   'Back + Start': 'Back + Start',
   'Guide is the Xbox or PS button. Back is View, Select or Create.': 'Guide: кнопка Xbox или PS. Back: View, Select или Create.',
+  'Turn off a controller (hold both for 2 seconds)': 'Выключить геймпад (зажать обе на 2 секунды)',
+  'The controller you hold them on turns off, as holding its Home button does. Wireless controllers only, and not the buttons that close the games.': 'Геймпад, на котором их зажали, выключается, как при удержании кнопки Home. Только беспроводные геймпады, и не те кнопки, что закрывают игры.',
   'How to play': 'Как играть',
   'Couchlink adds': 'Couchlink добавляет',
   'One copy for everyone; the game splits the screen': 'Одна копия на всех, игра сама делит экран',
