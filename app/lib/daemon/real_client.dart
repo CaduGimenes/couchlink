@@ -97,6 +97,15 @@ class DaemonClient extends CouchClient {
   Future<String?> setOnlyInFront(bool on) => _cmd('set_only_in_front', {'on': on});
 
   @override
+  Future<bool?> addLauncherGames() async {
+    final r = await _request('get_add_launcher_games', const {});
+    return r['ok'] == true ? r['on'] == true : null;
+  }
+
+  @override
+  Future<String?> setAddLauncherGames(bool on) => _cmd('set_add_launcher_games', {'on': on});
+
+  @override
   Future<String?> setStreamDisplay(bool on) => _cmd('set_stream_display', {'on': on});
   @override
   bool get catalogRefreshing => _refreshing;

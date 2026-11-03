@@ -405,6 +405,17 @@ class FakeClient extends CouchClient {
   @override
   Future<bool?> virtualScreensReady() async => _virtualScreens;
 
+  bool addLauncherGamesOn = true;
+
+  @override
+  Future<bool?> addLauncherGames() async => addLauncherGamesOn;
+
+  @override
+  Future<String?> setAddLauncherGames(bool on) async {
+    addLauncherGamesOn = on;
+    return null;
+  }
+
   @override
   Future<String?> setStreamDisplay(bool on) async {
     if (on && !_virtualScreens) return 'the virtual display needs the display driver; set it up first';

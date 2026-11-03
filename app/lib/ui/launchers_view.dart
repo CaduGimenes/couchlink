@@ -180,6 +180,8 @@ class _LaunchersViewState extends State<LaunchersView> {
           step(1, t('Tools, Manage Emulators, Add. Name it Couchlink, with the application path above and these default command-line parameters:')),
           field('play-exe', '--play-exe'),
           step(2, t('Put your co-op games on a platform that uses it. LaunchBox hands Couchlink each game’s program, and Couchlink picks the game it belongs to.')),
+          const SizedBox(height: 10),
+          const _AddLauncherGames(),
         ]);
       case LaunchPlace.shortcut:
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -200,5 +202,51 @@ class _LaunchersViewState extends State<LaunchersView> {
           field('command', '"${cmd.program}" ${cmd.args}'),
         ]);
     }
+  }
+}
+
+/// Whether a game a launcher starts that Couchlink does not know yet goes into the Library on the fly (on by default),
+/// so a launcher's whole library plays without adding each game first.
+class _AddLauncherGames extends StatefulWidget {
+  const _AddLauncherGames();
+
+  @override
+  State<_AddLauncherGames> createState() => _AddLauncherGamesState();
+}
+
+class _AddLauncherGamesState extends State<_AddLauncherGames> {
+  bool? _on;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final on = await Scope.of(context).client.addLauncherGames();
+      if (mounted) setState(() => _on = on ?? true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Expanded(child: Text(t('Add games Couchlink does not know yet'), style: txt(context, size: 12.5, weight: FontWeight.w600, color: c.ink))),
+        Switch(
+          key: const ValueKey('add-launcher-games'),
+          value: _on ?? true,
+          onChanged: _on == null
+              ? null
+              : (on) {
+                  setState(() => _on = on);
+                  runCmd(context, () => Scope.of(context).client.setAddLauncherGames(on));
+                },
+        ),
+      ]),
+      Text(
+        t('A game LaunchBox or another launcher starts through Couchlink goes into your Library the first time, so you do not have to add each one.'),
+        style: txt(context, size: 11.5, color: c.ink3, height: 1.35),
+      ),
+    ]);
   }
 }

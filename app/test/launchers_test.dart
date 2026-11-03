@@ -64,6 +64,11 @@ void main() {
     await tester.tap(byKey('launch-place-launchbox'));
     await settle(tester);
     expect(fieldText(tester, 'launch-play-exe'), '--play-exe');
+    // Games the launcher starts that Couchlink does not know yet are added on the fly, unless this is turned off.
+    expect(tester.widget<Switch>(byKey('add-launcher-games')).value, isTrue);
+    await tester.tap(byKey('add-launcher-games'));
+    await settle(tester);
+    expect(client.addLauncherGamesOn, isFalse);
 
     await tester.tap(byKey('launch-place-shortcut'));
     await settle(tester);

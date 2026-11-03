@@ -210,6 +210,8 @@ const Map<String, String> ruStrings = {
   'Remove virtual display': 'Убрать виртуальный экран',
   'Setting up...': 'Настройка...',
   'Virtual display added: put players on it, then stream it with Steam Link or another streaming app': 'Виртуальный экран добавлен: посадите на него игроков и транслируйте его через Steam Link или другое приложение',
+  'Add games Couchlink does not know yet': 'Добавлять игры, которых Couchlink ещё не знает',
+  'A game LaunchBox or another launcher starts through Couchlink goes into your Library the first time, so you do not have to add each one.': 'Игра, которую LaunchBox или другой лаунчер запускает через Couchlink, в первый раз попадает в библиотеку, так что добавлять каждую не нужно.',
   'Keyboard and mouse can take a seat too. Couchlink gives each copy of the game only its own devices, so nobody steers someone else.': 'Клавиатура и мышь тоже могут занять место. Couchlink даёт каждой копии игры только её устройства, чтобы никто не управлял чужим игроком.',
   'Player {seat_1}': 'Игрок {seat_1}',
   'Click to join': 'Нажмите, чтобы сесть',

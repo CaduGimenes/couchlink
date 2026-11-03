@@ -49,6 +49,11 @@ fn save_setting(key: &str, value: serde_json::Value) {
     }
 }
 
+/// Start from other apps, "Add games Couchlink does not know yet". On unless turned off.
+fn add_launcher_games() -> bool {
+    load_settings()["add_launcher_games"].as_bool().unwrap_or(true)
+}
+
 /// Settings, "Close players' own Steam when a session ends". Off unless turned on.
 fn steam_close_on_end() -> bool {
     load_settings()["steam_close_on_end"].as_bool().unwrap_or(false)
@@ -881,8 +886,17 @@ impl Hub {
                 self.broadcast(&Event::GamesChanged);
                 Ok(none)
             }
+            Command::SetAddLauncherGames { on } => {
+                save_setting("add_launcher_games", json!(on));
+                Ok(none)
+            }
+            Command::GetAddLauncherGames => Ok(json!({ "on": add_launcher_games() })),
             Command::Play { recipe, exe } => {
-                let (id, added) = self.session.find_or_add_game(recipe.as_deref(), exe.as_deref())?;
+                let (id, added) = if add_launcher_games() {
+                    self.session.find_or_add_game(recipe.as_deref(), exe.as_deref())?
+                } else {
+                    (self.session.find_game(recipe.as_deref(), exe.as_deref())?, false)
+                };
                 if added {
                     self.log(LogLevel::Info, format!("a launcher starts {id}, added to the Library just now"));
                     self.broadcast(&Event::GamesChanged);

@@ -209,6 +209,11 @@ abstract class CouchClient extends ChangeNotifier {
   /// `virtual_screens`: true when the display driver for virtual screens is installed and ready (null on error).
   Future<bool?> virtualScreensReady();
 
+  /// `get_add_launcher_games` / `set_add_launcher_games`: whether a game a launcher starts that Couchlink does not know
+  /// yet is added to the Library on the fly.
+  Future<bool?> addLauncherGames();
+  Future<String?> setAddLauncherGames(bool on);
+
   /// `set_stream_display`: the virtual display for streaming (Steam Link to a TV, say) in the display list, on or off.
   Future<String?> setStreamDisplay(bool on);
 

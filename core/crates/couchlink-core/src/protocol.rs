@@ -103,6 +103,12 @@ pub enum Command {
     SetOnlyInFront {
         on: bool,
     },
+    /// Whether a game a launcher starts that Couchlink does not know yet is added to the Library on the fly (on by
+    /// default). `get_add_launcher_games` answers `{"on": bool}`.
+    SetAddLauncherGames {
+        on: bool,
+    },
+    GetAddLauncherGames,
     /// The virtual display for streaming in the display list (`session::STREAM_DISPLAY_ID`), on or off.
     SetStreamDisplay {
         on: bool,
