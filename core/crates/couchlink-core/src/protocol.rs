@@ -103,6 +103,10 @@ pub enum Command {
     SetOnlyInFront {
         on: bool,
     },
+    /// The virtual display for streaming in the display list (`session::STREAM_DISPLAY_ID`), on or off.
+    SetStreamDisplay {
+        on: bool,
+    },
     /// The close-the-games shortcut; either part may be left out to keep it.
     SetStopShortcut {
         #[serde(default)]
@@ -158,6 +162,12 @@ pub enum Command {
     DebugPress {
         device: String,
         button: Button,
+    },
+    /// Dev only: presses these keys (virtual key codes, held in order, let go in reverse) on a seated keyboard, as if
+    /// typed on it (Shift+Tab for Steam's overlay, say).
+    DebugKeys {
+        device: String,
+        keys: Vec<u16>,
     },
     ListGames,
     /// A game of the player's own (any store, or none): its program or its folder.

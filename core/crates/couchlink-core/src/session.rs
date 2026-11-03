@@ -187,6 +187,26 @@ impl SeatPlan {
     }
 }
 
+/// The virtual display for streaming (Screens, "Add a virtual display"): a screen like a monitor, made by the display
+/// driver for as long as a session plays on it, so Steam Link or another streaming app can show it on a TV.
+pub const STREAM_DISPLAY_ID: &str = "vdisp:stream";
+
+/// The streaming display as the display list shows it. Its place is made when a session starts (see `vscreens`).
+pub fn stream_display() -> Display {
+    Display {
+        id: STREAM_DISPLAY_ID.to_string(),
+        name: "Virtual display".to_string(),
+        x: 0,
+        y: 0,
+        w: 1920,
+        h: 1080,
+        scale: 1.0,
+        hz: 60.0,
+        primary: false,
+        used: true,
+    }
+}
+
 /// The display used for a screen whose display is not connected, when the caller allows that (`--dev`).
 pub fn fallback_display(id: &str) -> Display {
     Display { id: id.to_string(), name: "Test display".to_string(), x: 0, y: 0, w: 1920, h: 1080, scale: 1.0, hz: 60.0, primary: true, used: true }

@@ -406,6 +406,16 @@ class FakeClient extends CouchClient {
   Future<bool?> virtualScreensReady() async => _virtualScreens;
 
   @override
+  Future<String?> setStreamDisplay(bool on) async {
+    if (on && !_virtualScreens) return 'the virtual display needs the display driver; set it up first';
+    final s = _state;
+    final rest = [for (final d in s.displays) if (d.id != kStreamDisplayId) d];
+    final displays = on ? [...rest, const DisplayInfo(id: kStreamDisplayId, name: 'Virtual display', x: 0, y: 0, w: 1920, h: 1080, used: true)] : rest;
+    _set(DaemonState(devices: s.devices, seats: s.seats, displays: displays, screens: s.screens, layout: s.layout, fpsLimit: s.fpsLimit, stopKeys: s.stopKeys, stopPad: s.stopPad, turnOffPad: s.turnOffPad, frontKeys: s.frontKeys, hideKeys: s.hideKeys, hostControl: s.hostControl, controlKeys: s.controlKeys, showCursors: s.showCursors, onlyInFront: s.onlyInFront, dev: s.dev));
+    return null;
+  }
+
+  @override
   Future<String?> setupVirtualScreens() async {
     _virtualScreens = true;
     notifyListeners();

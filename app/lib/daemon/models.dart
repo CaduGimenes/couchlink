@@ -85,6 +85,9 @@ class Seat {
   }
 }
 
+/// The virtual display for streaming (the daemon's `STREAM_DISPLAY_ID`).
+const kStreamDisplayId = 'vdisp:stream';
+
 class DisplayInfo {
   const DisplayInfo({
     required this.id,

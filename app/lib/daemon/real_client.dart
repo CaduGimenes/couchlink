@@ -95,6 +95,9 @@ class DaemonClient extends CouchClient {
   Future<String?> setShowCursors(bool on) => _cmd('set_show_cursors', {'on': on});
   @override
   Future<String?> setOnlyInFront(bool on) => _cmd('set_only_in_front', {'on': on});
+
+  @override
+  Future<String?> setStreamDisplay(bool on) => _cmd('set_stream_display', {'on': on});
   @override
   bool get catalogRefreshing => _refreshing;
   @override

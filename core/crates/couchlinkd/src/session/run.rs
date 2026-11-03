@@ -262,14 +262,32 @@ impl Run {
 
     /// Seats on a screen set to virtual screens get a virtual monitor of their part's size: the copy plays there (its
     /// rect becomes the monitor's) and a window in the part shows it.
+    ///
+    /// Seats on the virtual display for streaming share one more monitor, the size of that display: their parts are
+    /// moved onto it, and nothing shows it on a real screen (a streaming app does).
     fn virtual_screens(&mut self) -> Result<(), String> {
-        let idxs: Vec<usize> = (0..self.seats.len()).filter(|&i| self.seats[i].plan.virtual_screen).collect();
-        if idxs.is_empty() {
+        use couchlink_core::session::{stream_display, STREAM_DISPLAY_ID};
+        let stream: Vec<usize> = (0..self.seats.len()).filter(|&i| self.seats[i].plan.display == STREAM_DISPLAY_ID).collect();
+        let idxs: Vec<usize> = (0..self.seats.len()).filter(|&i| self.seats[i].plan.virtual_screen && !stream.contains(&i)).collect();
+        if idxs.is_empty() && stream.is_empty() {
             return Ok(());
         }
         let parts: Vec<couchlink_core::session::Rect> = idxs.iter().map(|&i| self.seats[i].plan.rect).collect();
-        let sizes: Vec<(i32, i32)> = parts.iter().map(|&r| super::vscreens::monitor_size(r)).collect();
-        let made = super::vscreens::Session::begin(&sizes, &mut self.journal)?;
+        let mut sizes: Vec<(i32, i32)> = parts.iter().map(|&r| super::vscreens::monitor_size(r)).collect();
+        if !stream.is_empty() {
+            let d = stream_display();
+            sizes.push((d.w, d.h));
+        }
+        let mut made = super::vscreens::Session::begin(&sizes, &mut self.journal)?;
+        if !stream.is_empty() {
+            let monitor = made.displays.pop().ok_or("the virtual display was not made")?.rect;
+            for &i in &stream {
+                let r = &mut self.seats[i].plan.rect;
+                r.x += monitor.x;
+                r.y += monitor.y;
+            }
+            crate::logfile::write("info", &format!("the virtual display for streaming is at {},{} ({}x{})", monitor.x, monitor.y, monitor.w, monitor.h));
+        }
         let mut redirects = Vec::new();
         for ((&i, part), vd) in idxs.iter().zip(parts).zip(made.displays) {
             self.seats[i].plan.rect = vd.rect;

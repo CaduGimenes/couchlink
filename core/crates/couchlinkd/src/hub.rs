@@ -144,6 +144,8 @@ pub struct Hub {
     /// Activator memory per pad, for the seat profile.
     procs: HashMap<String, ProcState>,
     started: Instant,
+    /// The connected displays as last reported (the streaming display is added to these, see `apply_displays`).
+    raw_displays: Vec<couchlink_core::types::Display>,
     /// Game session settings, and the last picture of the session sent to clients.
     session: session::Config,
     session_info: SessionInfo,
@@ -177,6 +179,7 @@ impl Hub {
             seat_profiles,
             procs: HashMap::new(),
             started: Instant::now(),
+            raw_displays: Vec::new(),
             session,
             session_info: SessionInfo::idle(),
             session_handle: None,
@@ -477,6 +480,16 @@ impl Hub {
         }
     }
 
+    /// The display list for the state: the connected displays, and the virtual display for streaming when it is on
+    /// (Screens, "Add a virtual display") and its driver is there. True when the list changed.
+    fn apply_displays(&mut self) -> bool {
+        let mut list = self.raw_displays.clone();
+        if load_settings()["stream_display"].as_bool().unwrap_or(false) && crate::session::vscreens::driver_present() {
+            list.push(couchlink_core::session::stream_display());
+        }
+        self.model.set_displays(list)
+    }
+
     fn changed(&mut self) {
         if self.model.prune_screens() {
             save_screens(self.model.screens());
@@ -657,6 +670,19 @@ impl Hub {
                 if self.model.set_show_cursors(on) {
                     save_setting("show_cursors", json!(on));
                     session::rawkbm::set_show_cursors(on);
+                    self.changed();
+                }
+                Ok(none)
+            }
+            Command::SetStreamDisplay { on } => {
+                if on && !crate::session::vscreens::driver_present() {
+                    return Err("the virtual display needs the display driver; set it up first".to_string());
+                }
+                save_setting("stream_display", json!(on));
+                if self.apply_displays() {
+                    if on {
+                        let _ = self.model.set_display_used(couchlink_core::session::STREAM_DISPLAY_ID, true);
+                    }
                     self.changed();
                 }
                 Ok(none)
@@ -869,6 +895,15 @@ impl Hub {
             Command::OpenSteamAccount { seat } => crate::accounts::open(seat).map(|_| none),
             Command::SetupSteamAccount { seat } => self.steam_account_step("setup", seat),
             Command::RemoveSteamAccount { seat } => self.steam_account_step("remove", seat),
+            Command::DebugKeys { device, keys } => {
+                if !self.model.dev() {
+                    return Err("debug_keys needs couchlinkd --dev".to_string());
+                }
+                if !crate::session::rawkbm::debug_keys(&device, &keys) {
+                    return Err(format!("{device} has no seat"));
+                }
+                Ok(none)
+            }
             Command::DebugPress { device, button } => {
                 if !self.model.dev() {
                     return Err("debug_press needs couchlinkd --dev".to_string());
@@ -1101,7 +1136,8 @@ player {}: {}", s.seat + 1, s.error.as_deref().unwrap_or_default());
                 }
             }
             SdlEvent::Displays(list) => {
-                if self.model.set_displays(list) {
+                self.raw_displays = list;
+                if self.apply_displays() {
                     self.broadcast_state();
                 }
             }

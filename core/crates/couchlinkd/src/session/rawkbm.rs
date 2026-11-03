@@ -781,6 +781,30 @@ fn give_back_focus() {
     });
 }
 
+/// Dev only (`debug_keys`): `keys` pressed on keyboard `device` as if typed on it, through its seat's feed. False when
+/// that keyboard has no seat.
+pub fn debug_keys(device: &str, keys: &[u16]) -> bool {
+    // Make codes of the keys tests type; others go without one.
+    let scan = |vk: u16| match vk {
+        0x10 | 0xA0 => 0x2A,
+        0xA1 => 0x36,
+        0x09 => 0x0F,
+        0x1B => 0x01,
+        _ => 0,
+    };
+    let mut r = registry();
+    if !r.seats.iter().any(|s| s.devices.iter().any(|d| d == device)) {
+        return false;
+    }
+    for &vk in keys {
+        r.route(device, Input::Key { vk, scan: scan(vk), flags: 0 });
+    }
+    for &vk in keys.iter().rev() {
+        r.route(device, Input::Key { vk, scan: scan(vk), flags: key_flags::BREAK });
+    }
+    true
+}
+
 /// The copy fed by `name` runs in process `pid` (host control finds it by the window under the pointer).
 pub fn add_pid(name: &str, pid: u32) {
     if let Some(seat) = registry().seats.iter_mut().find(|s| s.name == name) {

@@ -9,6 +9,22 @@ import 'helpers.dart';
 ScreenArrangement? screenOf(dynamic fake, String id) => (fake.state as DaemonState).screenFor(id);
 
 void main() {
+  testWidgets('a virtual display for streaming can be added (setting up its driver first) and removed', (tester) async {
+    final fake = newFake();
+    await pumpApp(tester, fake, view: AppView.screens);
+    expect(byKey('screen-$kStreamDisplayId'), findsNothing);
+    await tester.tap(byKey('stream-display'));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect((fake.state as DaemonState).displays.any((d) => d.id == kStreamDisplayId), isTrue);
+    expect(byKey('screen-$kStreamDisplayId'), findsOneWidget, reason: 'it is a screen players can be put on');
+    expect(find.text('Remove virtual display'), findsOneWidget);
+    await tester.tap(byKey('stream-display'));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(byKey('screen-$kStreamDisplayId'), findsNothing);
+    await tester.pump(const Duration(seconds: 5));
+  });
+
   testWidgets('draws displays where they stand, with name and resolution', (tester) async {
     final fake = newFake();
     await pumpApp(tester, fake, view: AppView.screens);

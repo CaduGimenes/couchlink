@@ -68,6 +68,7 @@ class _ScreensViewState extends State<ScreensView> {
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     _FpsLimit(fps: st.fpsLimit),
+                    _StreamDisplayButton(on: st.displays.any((d) => d.id == kStreamDisplayId)),
                     CButton(
                       key: const ValueKey('identify-screens'),
                       label: t('Identify screens'),
@@ -88,6 +89,56 @@ class _ScreensViewState extends State<ScreensView> {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ------------------------------------------------------------------ virtual display
+
+/// Adds a virtual display to play on: a screen like a monitor that only a streaming app shows (Steam Link to a TV),
+/// made while a session plays on it. The first time it sets up the display driver (one Windows prompt).
+class _StreamDisplayButton extends StatefulWidget {
+  const _StreamDisplayButton({required this.on});
+
+  final bool on;
+
+  @override
+  State<_StreamDisplayButton> createState() => _StreamDisplayButtonState();
+}
+
+class _StreamDisplayButtonState extends State<_StreamDisplayButton> {
+  bool _busy = false;
+
+  Future<void> _toggle() async {
+    final scope = Scope.of(context);
+    final client = scope.client;
+    setState(() => _busy = true);
+    String? err;
+    if (!widget.on && await client.virtualScreensReady() != true) {
+      err = await client.setupVirtualScreens();
+      // The setup waits for the Windows prompt and the install.
+      for (var i = 0; err == null && i < 90 && await client.virtualScreensReady() != true; i++) {
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
+    }
+    err ??= await client.setStreamDisplay(!widget.on);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (err != null) {
+      scope.toaster.show(err, long: true);
+    } else if (!widget.on) {
+      scope.toaster.show(t('Virtual display added: put players on it, then stream it with Steam Link or another streaming app'), long: true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CButton(
+      key: const ValueKey('stream-display'),
+      label: _busy ? t('Setting up...') : (widget.on ? t('Remove virtual display') : t('Add a virtual display')),
+      small: true,
+      leading: CIcon(iconMonitor, size: 14, color: context.c.ink, strokeWidth: 1.8),
+      onTap: _busy ? null : _toggle,
     );
   }
 }

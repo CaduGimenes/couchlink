@@ -209,6 +209,9 @@ abstract class CouchClient extends ChangeNotifier {
   /// `virtual_screens`: true when the display driver for virtual screens is installed and ready (null on error).
   Future<bool?> virtualScreensReady();
 
+  /// `set_stream_display`: the virtual display for streaming (Steam Link to a TV, say) in the display list, on or off.
+  Future<String?> setStreamDisplay(bool on);
+
   /// `setup_virtual_screens`: installs the display driver (one Windows prompt). Replies at once; a log line says
   /// when it is done.
   Future<String?> setupVirtualScreens();
