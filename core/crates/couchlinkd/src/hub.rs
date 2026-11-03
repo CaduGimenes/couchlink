@@ -856,7 +856,11 @@ impl Hub {
                 Ok(none)
             }
             Command::Play { recipe, exe } => {
-                let id = self.session.find_game(recipe.as_deref(), exe.as_deref())?;
+                let (id, added) = self.session.find_or_add_game(recipe.as_deref(), exe.as_deref())?;
+                if added {
+                    self.log(LogLevel::Info, format!("a launcher starts {id}, added to the Library just now"));
+                    self.broadcast(&Event::GamesChanged);
+                }
                 self.log(LogLevel::Info, format!("a launcher starts {id}"));
                 self.start_session(&id, &Default::default(), false)
             }

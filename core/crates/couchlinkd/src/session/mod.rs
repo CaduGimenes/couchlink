@@ -232,6 +232,33 @@ impl Config {
             .ok_or_else(|| format!("{given} is not in the folder of a game Couchlink knows; add the game in Couchlink first"))
     }
 
+    /// `play` from a launcher: the game it asks for, and when its program is in no game Couchlink knows, that game
+    /// added first (as the Library's "Add game" does), so a launcher's whole library plays without adding each game.
+    /// A shortcut (`.lnk`, or a Steam `.url`) counts as the program it leads to. The bool is true for an added game.
+    pub fn find_or_add_game(&self, recipe: Option<&str>, exe: Option<&str>) -> Result<(String, bool), String> {
+        let Some(given) = exe.map(str::trim).filter(|e| !e.is_empty()) else {
+            return self.find_game(recipe, exe).map(|id| (id, false));
+        };
+        if recipe.is_some_and(|r| !r.trim().is_empty()) {
+            return self.find_game(recipe, exe).map(|id| (id, false));
+        }
+        let target = crate::launchers::resolve_launch_target(Path::new(given));
+        let shown = target.display().to_string();
+        match self.find_game(None, Some(&shown)) {
+            Ok(id) => Ok((id, false)),
+            Err(e) if !target.exists() => Err(e),
+            Err(_) => {
+                // A shortcut's own name is the game's ("DRAGONBALL Sparking! Collection.lnk").
+                let named = Path::new(given)
+                    .extension()
+                    .is_some_and(|x| x.eq_ignore_ascii_case("lnk") || x.eq_ignore_ascii_case("url"))
+                    .then(|| Path::new(given).file_stem().map(|s| s.to_string_lossy().into_owned()))
+                    .flatten();
+                self.add_game(&shown, named.as_deref()).map(|id| (id, true))
+            }
+        }
+    }
+
     fn try_game(&self, recipe: &str) -> Result<(couchlink_core::Recipe, PathBuf), String> {
         if !recipe.starts_with("try-") {
             return Err(format!("{recipe} has a recipe of its own, which names its program"));
@@ -431,7 +458,8 @@ mod tests {
         let state = temp(&format!("{tag}-state"));
         std::fs::write(state.join("games.json"), serde_json::json!({ recipe: game.display().to_string() }).to_string()).unwrap();
         let builtin = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../recipes");
-        let deps = Deps { launcher: Arc::new(CommandLauncher), locators: vec![recipes::games_json_locator(state.clone())], undoers: Undoers::new(), prepare: None };
+        let locators = vec![recipes::games_json_locator(state.clone()), stores::locator(state.clone())];
+        let deps = Deps { launcher: Arc::new(CommandLauncher), locators, undoers: Undoers::new(), prepare: None };
         Config::new(Some(builtin), state, deps)
     }
 
@@ -460,6 +488,22 @@ mod tests {
         assert_eq!(cfg.find_game(None, Some(&exe)).unwrap(), "fallout-new-vegas-coop");
         assert!(cfg.find_game(Some("no-such-game"), None).is_err());
         assert!(cfg.find_game(None, Some(&std::env::temp_dir().join("elsewhere.exe").display().to_string())).is_err());
+    }
+
+    #[test]
+    fn a_launcher_starts_a_game_couchlink_did_not_know_by_adding_it() {
+        let game = temp("play-new-game");
+        std::fs::write(game.join("Sparking.exe"), b"MZ").unwrap();
+        let cfg = config("play-new", "fallout-new-vegas-coop", &temp("play-new-fnv"));
+        let exe = game.join("Sparking.exe").display().to_string();
+        assert!(cfg.find_game(None, Some(&exe)).is_err(), "not known yet");
+        let (id, added) = cfg.find_or_add_game(None, Some(&exe)).unwrap();
+        assert!(added);
+        assert!(id.starts_with("try-"), "it plays as a Try it game: {id}");
+        let (again, added_again) = cfg.find_or_add_game(None, Some(&exe)).unwrap();
+        assert_eq!((again.as_str(), added_again), (id.as_str(), false), "the second time it is known");
+        let missing = game.join("Gone.exe").display().to_string();
+        assert!(cfg.find_or_add_game(None, Some(&missing)).is_err(), "a program that is not there is not added");
     }
 
     #[test]

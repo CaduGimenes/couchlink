@@ -59,6 +59,62 @@ pub fn create_shortcut(dir: &Path, game: &str, recipe: &str, icon: Option<&Path>
     Ok(path)
 }
 
+/// The Steam game a link starts: `steam://rungameid/<id>` (a Start menu or desktop `.url`), or Steam itself started
+/// with `-applaunch <id>`.
+pub fn steam_app_in(text: &str) -> Option<u32> {
+    let lower = text.to_ascii_lowercase();
+    for key in ["steam://rungameid/", "-applaunch "] {
+        if let Some(at) = lower.find(key) {
+            let digits: String = lower[at + key.len()..].trim_start().chars().take_while(char::is_ascii_digit).collect();
+            if let Ok(id) = digits.parse() {
+                return Some(id);
+            }
+        }
+    }
+    None
+}
+
+/// What a program a launcher hands over really is. LaunchBox and others often name a shortcut: a `.lnk` leads to its
+/// program, and a link to a Steam game (a `.url` to `steam://rungameid/<id>`, or a `.lnk` to Steam with `-applaunch`)
+/// to that game's folder. Anything else, or a shortcut that cannot be read, stays as it is.
+pub fn resolve_launch_target(given: &Path) -> PathBuf {
+    let ext = given.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    let steam_dir = |text: &str| steam_app_in(text).and_then(couchlink_steam::find_app).map(|a| a.install_dir);
+    match ext.as_str() {
+        "url" => {
+            let text = std::fs::read_to_string(given).unwrap_or_default();
+            let url = text.lines().find_map(|l| l.trim().strip_prefix("URL=")).unwrap_or_default().to_string();
+            steam_dir(&url).unwrap_or_else(|| given.to_path_buf())
+        }
+        "lnk" => match lnk_target(given) {
+            Some((target, args)) => steam_dir(&format!("{} {args}", target.display())).unwrap_or(target),
+            None => given.to_path_buf(),
+        },
+        _ => given.to_path_buf(),
+    }
+}
+
+/// A `.lnk`'s program and its arguments, read through WScript.Shell. None when it names no program (a Store app's).
+#[cfg(windows)]
+fn lnk_target(lnk: &Path) -> Option<(PathBuf, String)> {
+    let script = "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:CL_LNK); $s.TargetPath; $s.Arguments";
+    let out = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .env("CL_LNK", lnk)
+        .creation_flags_hidden()
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    let mut lines = text.lines();
+    let target = lines.next().map(str::trim).filter(|t| !t.is_empty())?;
+    Some((PathBuf::from(target), lines.next().unwrap_or_default().trim().to_string()))
+}
+
+#[cfg(not(windows))]
+fn lnk_target(_: &Path) -> Option<(PathBuf, String)> {
+    None
+}
+
 /// The desktop folder of the person at the PC.
 #[cfg(windows)]
 pub fn desktop() -> Result<PathBuf, String> {
@@ -265,6 +321,25 @@ pub fn add_to_steam(game: &str, recipe: &str, icon: Option<&Path>) -> Result<(),
     std::fs::write(&file, write_kv(&kv)).map_err(|e| format!("cannot write {}: {e}", file.display()))?;
     std::process::Command::new(root.join("steam.exe")).spawn().map_err(|e| format!("added, but Steam could not be opened again: {e}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod launch_target_tests {
+    use super::*;
+
+    #[test]
+    fn steam_links_name_their_game() {
+        assert_eq!(steam_app_in("steam://rungameid/1790600"), Some(1790600));
+        assert_eq!(steam_app_in(r"C:\Program Files (x86)\Steam\steam.exe -applaunch 1790600 -silent"), Some(1790600));
+        assert_eq!(steam_app_in(r"C:\Games\Sparking.exe"), None);
+        let url = std::env::temp_dir().join("couchlink-not-steam.url");
+        std::fs::write(&url, "[InternetShortcut]
+URL=https://example.com/
+").unwrap();
+        assert_eq!(resolve_launch_target(&url), url, "a link to something else stays as it is");
+        let exe = std::env::temp_dir().join("couchlink-plain.exe");
+        assert_eq!(resolve_launch_target(&exe), exe);
+    }
 }
 
 #[cfg(test)]
