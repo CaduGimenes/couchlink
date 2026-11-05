@@ -397,6 +397,17 @@ class _OffZone extends StatelessWidget {
 // ------------------------------------------------------------------------ room
 
 /// The displays drawn where they stand on the desktop, scaled to fit.
+/// Where each display is drawn in the room, as on the desktop. The virtual display for streaming has no place on the
+/// desktop until a session makes it, so it is drawn next to the real ones, not on top of them.
+Map<String, Offset> roomPlaces(List<DisplayInfo> displays) {
+  final places = {for (final d in displays) d.id: Offset(d.x.toDouble(), d.y.toDouble())};
+  final real = displays.where((d) => d.id != kStreamDisplayId);
+  if (real.isNotEmpty && places.containsKey(kStreamDisplayId)) {
+    places[kStreamDisplayId] = Offset(real.map((d) => d.x + d.w).reduce(math.max).toDouble(), real.map((d) => d.y).reduce(math.min).toDouble());
+  }
+  return places;
+}
+
 class _Room extends StatelessWidget {
   const _Room({required this.ctl, required this.flash});
   final ScreensController ctl;
@@ -406,8 +417,9 @@ class _Room extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, box) {
       final ds = [for (final e in ctl.screens) e.display];
-      final minX = ds.map((d) => d.x).reduce(math.min).toDouble(), minY = ds.map((d) => d.y).reduce(math.min).toDouble();
-      final maxX = ds.map((d) => d.x + d.w).reduce(math.max).toDouble(), maxY = ds.map((d) => d.y + d.h).reduce(math.max).toDouble();
+      final at = roomPlaces(ds);
+      final minX = ds.map((d) => at[d.id]!.dx).reduce(math.min), minY = ds.map((d) => at[d.id]!.dy).reduce(math.min);
+      final maxX = ds.map((d) => at[d.id]!.dx + d.w).reduce(math.max), maxY = ds.map((d) => at[d.id]!.dy + d.h).reduce(math.max);
       final avail = box.maxWidth * .94;
       final k = math.min(avail / (maxX - minX), 380 / (maxY - minY));
       final w = (maxX - minX) * k, h = (maxY - minY) * k;
@@ -419,17 +431,17 @@ class _Room extends StatelessWidget {
             for (final e in ctl.screens)
               Positioned(
                 key: ValueKey('screen-${e.display.id}'),
-                left: (e.display.x - minX) * k + 6,
-                top: (e.display.y - minY) * k + 6,
+                left: (at[e.display.id]!.dx - minX) * k + 6,
+                top: (at[e.display.id]!.dy - minY) * k + 6,
                 width: e.display.w * k - 12,
                 height: e.display.h * k - 12,
                 child: _ScreenCard(ctl: ctl, edit: e, flash: flash),
               ),
             for (final e in ctl.screens)
               Positioned(
-                left: (e.display.x - minX) * k - 40,
+                left: (at[e.display.id]!.dx - minX) * k - 40,
                 width: e.display.w * k + 80,
-                top: (e.display.y - minY) * k + e.display.h * k + 4,
+                top: (at[e.display.id]!.dy - minY) * k + e.display.h * k + 4,
                 child: _ScreenFooter(ctl: ctl, edit: e),
               ),
           ]),

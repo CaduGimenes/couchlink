@@ -4,6 +4,7 @@ pub mod button;
 pub mod catalog;
 pub mod edit;
 pub mod journal;
+pub mod last_setup;
 pub mod layouts;
 pub mod model;
 pub mod paths;

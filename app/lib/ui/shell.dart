@@ -232,6 +232,31 @@ class _ViewFrameState extends State<ViewFrame> {
 
 // ---------------------------------------------------------------- title bar
 
+/// Keeps the top of the window draggable while a dialog dims the rest. It lies above the dialogs, over the title bar's
+/// own drag area and short of its buttons, and takes nothing else: a dialog's dimmed area still closes it.
+class WindowDragStrip extends StatelessWidget {
+  const WindowDragStrip({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final chrome = WindowChrome.instance;
+    if (!chrome.enabled) return const SizedBox.shrink();
+    final mac = defaultTargetPlatform == TargetPlatform.macOS;
+    return Positioned(
+      key: const ValueKey('window-drag-strip'),
+      left: mac ? 78 : 0,
+      right: mac ? 0 : kCaptionButtonsWidth,
+      top: 0,
+      height: 38,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onDoubleTap: chrome.toggleMaximize,
+        child: const DragToMoveArea(child: SizedBox.expand()),
+      ),
+    );
+  }
+}
+
 class TitleBar extends StatelessWidget {
   const TitleBar({super.key});
 
@@ -270,6 +295,9 @@ class TitleBar extends StatelessWidget {
     );
   }
 }
+
+/// Three 46 wide buttons (`_Caption`).
+const double kCaptionButtonsWidth = 138;
 
 class _CaptionButtons extends StatelessWidget {
   const _CaptionButtons();

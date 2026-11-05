@@ -73,7 +73,7 @@ class _CouchlinkAppState extends State<CouchlinkApp> {
           client: widget.client,
           ui: _ui,
           toaster: _toaster,
-          child: DefaultTextStyle(style: txt(context), child: child!),
+          child: DefaultTextStyle(style: txt(context), child: Stack(fit: StackFit.expand, children: [child!, const WindowDragStrip()])),
         ),
         home: Shell(key: ValueKey(currentLang)),
       ),

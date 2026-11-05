@@ -7,6 +7,7 @@ use crate::sdl::{PadInfo, SdlCmd, SdlEvent, SdlHandle};
 use crate::session;
 use crate::session::rawkbm::{Kind as RawKind, RawKbmEvent};
 use couchlink_core::catalog::Catalog;
+use couchlink_core::last_setup::LastSetup;
 use couchlink_core::protocol::LogLevel;
 use couchlink_core::{
     parse_hex_color, Button, Command, Connection, Device, DeviceKind, Event, Family, InputSample, Model, Reply, Request,
@@ -68,6 +69,26 @@ fn load_screens() -> Vec<couchlink_core::Screen> {
     std::fs::read_to_string(screens_file()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
 }
 
+fn last_setup_file() -> std::path::PathBuf {
+    couchlink_core::paths::state_dir().join("last_setup.json")
+}
+
+/// The setup of the last game played, or none when the file is missing or broken.
+fn load_last_setup() -> Option<LastSetup> {
+    serde_json::from_str(&std::fs::read_to_string(last_setup_file()).ok()?).ok()
+}
+
+fn save_last_setup(setup: &LastSetup) {
+    let path = last_setup_file();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let tmp = path.with_extension("json.tmp");
+    if serde_json::to_string(setup).is_ok_and(|t| std::fs::write(&tmp, t).is_ok()) {
+        let _ = std::fs::rename(&tmp, &path);
+    }
+}
+
 fn save_screens(screens: &[couchlink_core::Screen]) {
     let path = screens_file();
     if let Some(dir) = path.parent() {
@@ -127,6 +148,10 @@ pub struct Hub {
     bluetooth: crate::bluetooth::Bluetooth,
     /// Pads that are virtual (debug_press only works on these).
     virtual_pads: HashSet<String>,
+    /// Each controller's lasting key (`PadInfo::lasting_key`); virtual pads have none.
+    pad_keys: HashMap<String, String>,
+    /// The last game's setup while it can still come back: until the seats are changed by hand or a game starts.
+    last_setup: Option<LastSetup>,
     /// Seat each pad's LED/player index was last set for.
     applied: HashMap<String, Option<usize>>,
     last_input: Option<BTreeMap<String, InputSample>>,
@@ -214,6 +239,8 @@ impl Hub {
             clients: HashMap::new(),
             bluetooth: crate::bluetooth::Bluetooth::system(),
             virtual_pads: HashSet::new(),
+            pad_keys: HashMap::new(),
+            last_setup: load_last_setup(),
             applied: HashMap::new(),
             last_input: None,
             stay,
@@ -603,16 +630,19 @@ impl Hub {
             }
             Command::Join { device } => {
                 self.model.seats.join(&device).map_err(err_text)?;
+                self.last_setup = None;
                 self.changed();
                 Ok(none)
             }
             Command::Leave { seat } => {
                 self.model.seats.leave(seat).map_err(err_text)?;
+                self.last_setup = None;
                 self.changed();
                 Ok(none)
             }
             Command::Swap { a, b } => {
                 self.model.seats.swap(a, b).map_err(err_text)?;
+                self.last_setup = None;
                 if a < MAX_SEATS && b < MAX_SEATS {
                     self.model.swap_screen_seats(a, b);
                     save_screens(self.model.screens());
@@ -625,6 +655,7 @@ impl Hub {
             }
             Command::Assign { device, seat } => {
                 self.model.seats.assign(&device, seat).map_err(err_text)?;
+                self.last_setup = None;
                 self.changed();
                 Ok(none)
             }
@@ -1040,6 +1071,7 @@ impl Hub {
             self.log(LogLevel::Info, format!("{recipe} starts with the layout {name:?}"));
         }
         let plan = self.session.plan(&self.model.state(), recipe, self.model.dev(), options, plain)?;
+        self.remember_setup();
         let tx = self.self_tx.clone();
         let report: session::Report = std::sync::Arc::new(move |info| {
             let _ = tx.send(HubMsg::Session(info));
@@ -1189,6 +1221,7 @@ player {}: {}", s.seat + 1, s.error.as_deref().unwrap_or_default());
                     seat: None,
                 });
                 self.log(LogLevel::Info, format!("{} connected: {}", if d.kind == RawKind::Keyboard { "Keyboard" } else { "Mouse" }, d.name));
+                self.restore_setup();
                 self.broadcast_state();
             }
             RawKbmEvent::Removed(id) => {
@@ -1208,6 +1241,8 @@ player {}: {}", s.seat + 1, s.error.as_deref().unwrap_or_default());
         let id = format!("pad:{}", info.id);
         if info.is_virtual {
             self.virtual_pads.insert(id.clone());
+        } else {
+            self.pad_keys.insert(id.clone(), info.lasting_key.clone());
         }
         let name = info.name.clone();
         self.model.seats.upsert_device(Device {
@@ -1221,6 +1256,7 @@ player {}: {}", s.seat + 1, s.error.as_deref().unwrap_or_default());
             can_turn_off: info.can_turn_off,
             seat: None,
         });
+        self.restore_setup();
         self.apply_pad_seats();
         self.log(LogLevel::Info, format!("Controller connected: {name}"));
         self.broadcast_state();
@@ -1231,6 +1267,7 @@ player {}: {}", s.seat + 1, s.error.as_deref().unwrap_or_default());
         let Some(dev) = self.model.seats.device(&dev_id).cloned() else { return };
         let seat = self.model.seats.remove_device(&dev_id);
         self.virtual_pads.remove(&dev_id);
+        self.pad_keys.remove(&dev_id);
         self.applied.remove(&dev_id);
         match seat {
             Some(s) => {
@@ -1242,12 +1279,39 @@ player {}: {}", s.seat + 1, s.error.as_deref().unwrap_or_default());
         self.broadcast_state();
     }
 
+    /// Keeps who sits where with which devices, and the screens, for the next time Couchlink starts.
+    fn remember_setup(&mut self) {
+        let keys = &self.pad_keys;
+        if let Some(setup) = LastSetup::capture(&self.model.seats, self.model.screens(), |d| lasting_key(keys, &d.id)) {
+            save_last_setup(&setup);
+        }
+        // From here on this run's own seats count.
+        self.last_setup = None;
+    }
+
+    /// The last game's setup comes back as its devices connect, until someone changes the seats by hand.
+    fn restore_setup(&mut self) {
+        let Some(setup) = self.last_setup.clone() else { return };
+        if self.session_info.active() {
+            return;
+        }
+        let keys = &self.pad_keys;
+        if !setup.restore(&mut self.model.seats, |d| lasting_key(keys, &d.id)) {
+            return;
+        }
+        self.model.restore_screens(setup.screens);
+        save_screens(self.model.screens());
+        self.log(LogLevel::Info, "Seats and screens from your last game are back");
+        self.changed();
+    }
+
     fn press_to_join(&mut self, device: &str) {
         if self.model.seats.seat_of(device).is_some() || self.model.seats.device(device).is_none() {
             return;
         }
         match self.model.seats.join(device) {
             Ok(seat) => {
+                self.last_setup = None;
                 self.apply_pad_seats();
                 self.broadcast(&Event::Joined { seat, device: device.to_string() });
                 self.broadcast_state();
@@ -1283,6 +1347,16 @@ player {}: {}", s.seat + 1, s.error.as_deref().unwrap_or_default());
 
 fn err_text(e: SeatError) -> String {
     e.to_string()
+}
+
+/// What stays the same for a device between runs: a keyboard's or mouse's id does, a controller's does not. None for
+/// a device that should not come back (a virtual pad).
+fn lasting_key(pad_keys: &HashMap<String, String>, device: &str) -> Option<String> {
+    if device.starts_with("pad:") {
+        pad_keys.get(device).cloned()
+    } else {
+        Some(device.to_string())
+    }
 }
 
 fn pad_number(device: &str) -> Option<u32> {

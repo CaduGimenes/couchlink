@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:couchlink/daemon/models.dart';
 import 'package:couchlink/ui/app_state.dart';
+import 'package:couchlink/ui/window.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,6 +12,34 @@ import 'helpers.dart';
 ScreenArrangement? screenOf(dynamic fake, String id) => (fake.state as DaemonState).screenFor(id);
 
 void main() {
+  testWidgets('the virtual display is drawn next to the real monitors, not on top of them', (tester) async {
+    final fake = newFake();
+    await pumpApp(tester, fake, view: AppView.screens);
+    await tester.tap(byKey('stream-display'));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
+    final stream = tester.getRect(byKey('screen-$kStreamDisplayId'));
+    for (final d in (fake.state as DaemonState).displays.where((d) => d.id != kStreamDisplayId)) {
+      final real = tester.getRect(byKey('screen-${d.id}'));
+      expect(stream.overlaps(real), isFalse, reason: '${d.id} is $real, the virtual display $stream');
+      expect(stream.left, greaterThanOrEqualTo(real.right));
+    }
+  });
+
+  testWidgets('the window can still be dragged by its top while a dialog is up', (tester) async {
+    WindowChrome.instance.enabled = true;
+    addTearDown(() => WindowChrome.instance.enabled = false);
+    await pumpApp(tester, newFake(), view: AppView.screens);
+    unawaited(showDialog<void>(context: tester.element(byKey('stream-display')), builder: (_) => const AlertDialog(title: Text('A dialog'))));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('A dialog'), findsOneWidget);
+    final strip = byKey('window-drag-strip');
+    final hits = tester.hitTestOnBinding(tester.getRect(strip).center);
+    final area = tester.renderObject(find.descendant(of: strip, matching: find.byType(Listener)).first);
+    expect(hits.path.any((e) => e.target == area), isTrue, reason: 'the strip lies above the dimmed area');
+    expect(find.text('A dialog'), findsOneWidget);
+  });
+
   testWidgets('a virtual display for streaming can be added (setting up its driver first) and removed', (tester) async {
     final fake = newFake();
     await pumpApp(tester, fake, view: AppView.screens);

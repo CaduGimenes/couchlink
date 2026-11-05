@@ -45,6 +45,8 @@ pub struct PadInfo {
     /// Wireless, and the platform can turn it off (`poweroff.rs`).
     pub can_turn_off: bool,
     pub is_virtual: bool,
+    /// What stays the same for this controller between runs (its id does not): its serial number or device path.
+    pub lasting_key: String,
 }
 
 /// The close-the-games pad buttons (`couchlink_core::shortcut`), or none; the SDL thread watches every pad for them.
@@ -477,6 +479,12 @@ impl Worker {
             charging,
             can_turn_off: target.is_some(),
             is_virtual,
+            lasting_key: pad
+                .serial_number()
+                .filter(|s| !s.is_empty())
+                .map(|s| format!("serial:{s}"))
+                .or_else(|| pad.path().filter(|p| !p.is_empty()).map(|p| format!("path:{p}")))
+                .unwrap_or_else(|| "unknown".to_string()),
         };
         self.batteries.insert(id, (battery, charging));
         crate::session::hook::set_xinput_slot(id, xinput_slot(id));
