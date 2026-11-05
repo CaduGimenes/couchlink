@@ -1457,7 +1457,7 @@ dependencies = [
 
 [[package]]
 name = "testgame"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "windows-sys 0.61.2",
  "x11rb",
