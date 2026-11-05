@@ -535,11 +535,13 @@ void KbmDrain() {
 bool KbmFilterMessage(MSG* m) {
     Beat();
     UINT u = m->message;
+    const bool overlay = SteamOverlayTakesRealInput();
     if (u >= 0x100 && u <= 0x109) {  // WM_KEYDOWN .. WM_UNICHAR
         if ((m->lParam & kSigKeyMask) == kSigKey) {
             m->lParam &= ~kSigKeyMask;
             return true;
         }
+        if (overlay) return true;
         Bump(C_KBM_REAL_DROPPED);
         return false;
     }
@@ -551,15 +553,18 @@ bool KbmFilterMessage(MSG* m) {
             m->pt = ScreenPos(anchor);
             return true;
         }
+        if (overlay) return true;
         Bump(C_KBM_REAL_DROPPED);
         return false;
     }
     if (u >= WM_NCMOUSEMOVE && u <= 0xAD && u != 0xAA) {  // non-client mouse messages of the real mouse
+        if (overlay) return true;
         Bump(C_KBM_REAL_DROPPED);
         return false;
     }
     if (u == WM_INPUT) {
         if ((static_cast<uint32_t>(m->lParam) & kSigRawMask) == kSigRaw) return true;
+        if (overlay) return true;
         Bump(C_KBM_REAL_DROPPED);
         return false;
     }
@@ -611,7 +616,10 @@ SHORT KeyStateFor(int vk, bool async) {
     return r;
 }
 
+// While Steam's overlay is open in this copy it reads the real keyboard and mouse (steam_overlay.cpp): it is asked
+// whether Shift is down when Tab comes, and where the pointer is for its clicks.
 SHORT WINAPI d_GetKeyState(int vk) {
+    if (SteamOverlayTakesRealInput()) return o_GetKeyState(vk);
     Bump(C_KBM_STATE_QUERIES);
     Beat();
     KbmDrain();
@@ -619,6 +627,7 @@ SHORT WINAPI d_GetKeyState(int vk) {
     return KeyStateFor(vk, false);
 }
 SHORT WINAPI d_GetAsyncKeyState(int vk) {
+    if (SteamOverlayTakesRealInput()) return o_GetAsyncKeyState(vk);
     Bump(C_KBM_STATE_QUERIES);
     Beat();
     KbmDrain();
@@ -626,6 +635,7 @@ SHORT WINAPI d_GetAsyncKeyState(int vk) {
     return KeyStateFor(vk, true);
 }
 BOOL WINAPI d_GetKeyboardState(PBYTE out) {
+    if (SteamOverlayTakesRealInput()) return o_GetKeyboardState(out);
     Bump(C_KBM_STATE_QUERIES);
     Beat();
     if (!out) return FALSE;

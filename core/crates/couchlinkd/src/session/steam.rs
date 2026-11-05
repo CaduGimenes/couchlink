@@ -113,22 +113,13 @@ fn steam_appid_file(ctx: &PrepareCtx, journal: &mut Journal) -> Result<(), Strin
 /// Seat 1 plays on the Steam of the person at the PC: started (to the tray) when it is not running with someone signed
 /// in, and waited for, so a game that needs Steam does not start without it.
 fn owner_steam(ctx: &PrepareCtx) -> Result<(), String> {
-    // Without Steam installed there is nothing to start; the game says what it misses.
-    if !cfg!(windows) || couchlink_steam::steam_root().is_none() || couchlink_steam::owner::owner_steam_ready() {
-        return Ok(());
+    #[cfg(windows)]
+    return crate::accounts::owner_steam_first().map_err(|e| format!("{} needs Steam: {e}", ctx.recipe.game));
+    #[cfg(not(windows))]
+    {
+        let _ = ctx;
+        Ok(())
     }
-    crate::logfile::write("info", &format!("{} needs Steam: starting yours", ctx.recipe.game));
-    couchlink_steam::owner::start_owner_steam().map_err(|e| format!("{} needs Steam, which could not be started: {e}", ctx.recipe.game))?;
-    let start = std::time::Instant::now();
-    while !couchlink_steam::owner::owner_steam_ready() {
-        if start.elapsed() >= OWN_STEAM_WAIT {
-            return Err(format!("{} needs Steam: open Steam and sign in, then start again", ctx.recipe.game));
-        }
-        std::thread::sleep(std::time::Duration::from_millis(500));
-    }
-    // Steam takes a moment after signing in before games can talk to it.
-    std::thread::sleep(std::time::Duration::from_secs(3));
-    Ok(())
 }
 
 /// How long a seat's own Steam gets to start before its game copy is launched.
@@ -153,11 +144,20 @@ fn own_account(ctx: &PrepareCtx) -> Result<SeatPrep, String> {
         }
         return Ok(SeatPrep::default());
     };
+    // A Steam started before (by hand, or by an older Couchlink) shares its overlay channels with the other Steam, so
+    // the overlay in this seat's game could not open: it starts again, once, with its own.
+    #[cfg(windows)]
+    if couchlink_steam::accounts_steam_running(&cfg) && !crate::accounts::steam_has_own_channels(&cfg) {
+        crate::logfile::write("info", &format!("restarting {}'s own Steam so its overlay works next to yours", ctx.seat.player));
+        couchlink_steam::accounts_stop_steam(&cfg).map_err(|e| format!("cannot restart {}'s Steam: {}", ctx.seat.player, e.user_message()))?;
+        let start = std::time::Instant::now();
+        while couchlink_steam::accounts_steam_running(&cfg) && start.elapsed() < std::time::Duration::from_secs(15) {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+    }
     if !couchlink_steam::accounts_steam_running(&cfg) {
         let log = crate::accounts::seat_steam_log(seat as usize);
-        crate::logfile::write("info", &format!("starting {}'s own Steam (its output: {})", ctx.seat.player, log.display()));
-        couchlink_steam::accounts_start_steam_logged(&cfg, true, Some(&log))
-            .map_err(|e| format!("cannot start {}'s Steam: {}", ctx.seat.player, e.user_message()))?;
+        crate::accounts::start_steam(&cfg, seat as usize).map_err(|e| format!("cannot start {}'s Steam: {e}", ctx.seat.player))?;
         let start = std::time::Instant::now();
         while !couchlink_steam::accounts_steam_running(&cfg) && start.elapsed() < OWN_STEAM_WAIT {
             std::thread::sleep(std::time::Duration::from_millis(500));

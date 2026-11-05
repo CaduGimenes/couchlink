@@ -49,9 +49,12 @@ struct Config {
     std::wstring kbm_feed;  // name of the keyboard and mouse feed section, empty = none
     bool fake_cursor = false;  // draw an overlay cursor for the copy's fake mouse
     bool hook_children = false;  // inject this DLL into every process this process starts
+    std::vector<std::wstring> children_only;  // when set, only children with these exe names (lower case) are hooked
     bool hide_pads = false;  // own_pads was given: hide every game controller not in it
     std::vector<std::wstring> own_pads;  // this copy's controllers, as normalised device paths (pads_hook.cpp)
     std::vector<std::wstring> preload;  // DLLs loaded into the copy once the hooks are in (Steam's overlay)
+    std::vector<std::wstring> steam_names;  // Steam's fixed object names that get `steam_suffix` (names_hook.cpp)
+    std::wstring steam_suffix;
     uint32_t copy_id = 0;  // pid of the process the host injected first (suffix of renamed locks); 0 = this process
     uint32_t depth = 0;  // 0 for the process the host injected, +1 per child generation
     Json raw;  // the config exactly as received, handed on to children
@@ -160,6 +163,8 @@ bool KbmTakeFakeKeyDown(const MSG* m);
 void KbmDrain();
 // A key from the copy's own keyboard went down (`shift`: a Shift key is down too): Shift+Tab opens Steam's overlay.
 void SteamOverlayKey(uint16_t vk, bool shift);
+// True while Steam's overlay is open in this copy (and just after): its real keyboard and mouse reach it then.
+bool SteamOverlayTakesRealInput();
 
 // Children: JSON status of the processes this process hooked, for StatusJson.
 std::string ChildrenJson();

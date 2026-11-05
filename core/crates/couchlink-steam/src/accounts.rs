@@ -45,11 +45,14 @@ impl AccountsConfig {
     pub fn credential_target(&self) -> String {
         format!("Couchlink/SteamHelper/{}", self.user_name())
     }
+    /// The suffix the overlay channels ([`OVERLAY_CHANNELS`]) get in this seat's Steam and in its game copies.
+    pub fn overlay_suffix(&self) -> String {
+        format!("_{}", self.ipc_name())
+    }
     /// Command line used to start Steam as the helper user.
     pub fn steam_command_line(&self) -> String {
         format!("\"{}\" -master_ipc_name_override {} -userchooser", self.steam_exe.display(), self.ipc_name())
     }
-
 }
 
 /// One human-readable step for the confirmation screen.
@@ -291,6 +294,42 @@ pub fn accounts_apply(cfg: &AccountsConfig, confirmed: bool) -> Result<()> {
     imp::apply(cfg)
 }
 
+/// Names Steam gives its overlay channels, the same in every Steam: a seat's own Steam could not make them while the
+/// Steam of the person at the PC had them, so its game copies never got their Shift+Tab overlay. A seat's Steam and
+/// its copies rename them (the hook's `steam_names`) with [`AccountsConfig::overlay_suffix`].
+/// `SteamOverlayRunning_<app id>` is per game, but both copies of a game have the same app id. Steam's browser channel
+/// (`SteamWebHelper_GPUProcPIDStream`) is renamed too, so the hook has to follow Steam when it restarts itself: renamed
+/// on one side only it makes the browser restart over and over.
+pub const OVERLAY_CHANNELS: [&str; 8] = [
+    "SteamController_",
+    "SteamXInput",
+    "GameOverlayRender_PIDStream",
+    "GameOverlayRender_DetourErrorStream",
+    "SteamOverlayRunning_",
+    "SteamWebHelper_GPUProcPIDStream",
+    "SteamAllowSetForegroundEvent",
+    "SteamAllowSetForegroundCompleteEvent",
+];
+
+/// An event the hook makes in a seat's Steam it renamed the channels of (name + [`AccountsConfig::overlay_suffix`]),
+/// so Couchlink can tell that Steam from one started without the hook.
+pub const OVERLAY_MARKER: &str = "Couchlink_SteamChannels";
+
+/// A seat's Steam started with its main thread suspended (for the hook to go in first). The handles belong to the
+/// caller.
+#[derive(Debug)]
+pub struct SuspendedSteam {
+    pub pid: u32,
+    pub process: isize,
+    pub thread: isize,
+}
+
+/// Start the seat's Steam as the helper user, suspended. Windows only.
+pub fn accounts_start_steam_suspended(cfg: &AccountsConfig) -> Result<SuspendedSteam> {
+    check_name(cfg)?;
+    imp::start_steam_suspended(cfg)
+}
+
 /// Start Steam as the helper user. Returns the process id of the new Steam. Only after confirmation.
 pub fn accounts_start_steam(cfg: &AccountsConfig, confirmed: bool) -> Result<u32> {
     accounts_start_steam_logged(cfg, confirmed, None)
@@ -372,6 +411,9 @@ mod imp {
         Err(no())
     }
     pub fn start_steam(_: &AccountsConfig) -> Result<u32> {
+        Err(no())
+    }
+    pub fn start_steam_suspended(_: &AccountsConfig) -> Result<SuspendedSteam> {
         Err(no())
     }
     pub fn remove(_: &AccountsConfig) -> Result<()> {
@@ -624,12 +666,48 @@ mod imp {
         run_as(cfg, &cfg.steam_exe, line, false)
     }
 
+    pub fn start_steam_suspended(cfg: &AccountsConfig) -> Result<SuspendedSteam> {
+        // With `-userchooser`, as every start of a seat's Steam: both Steams share the Steam folder and its remembered
+        // sign-ins, so without it this one signs in to the last account used there, often the PC owner's, and signs
+        // the owner's Steam out ("Session Replaced").
+        let pi = spawn_as(cfg, &cfg.steam_exe, &cfg.steam_command_line(), false, true, &[])?;
+        Ok(SuspendedSteam { pid: pi.dwProcessId, process: pi.hProcess as isize, thread: pi.hThread as isize })
+    }
+
     /// Runs `app` with the command line `line` as the helper user, in `app`'s folder; `hidden` keeps its window out of
     /// sight.
     fn run_as(cfg: &AccountsConfig, app: &std::path::Path, line: &str, hidden: bool) -> Result<u32> {
+        let pi = spawn_as(cfg, app, line, hidden, false, &[])?;
+        // SAFETY: handles CreateProcessWithLogonW gave us, closed once.
+        unsafe {
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+        }
+        Ok(pi.dwProcessId)
+    }
+
+    /// `run_as`, keeping the process and thread handles; `suspended` leaves the main thread suspended, `env` is added
+    /// to the helper user's own environment (none: that environment as Windows makes it).
+    fn spawn_as(
+        cfg: &AccountsConfig,
+        app: &std::path::Path,
+        line: &str,
+        hidden: bool,
+        suspended: bool,
+        env: &[(String, String)],
+    ) -> Result<PROCESS_INFORMATION> {
+        use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
         let user = cfg.user_name();
         let password = read_password(&cfg.credential_target())?
             .ok_or_else(|| SteamError::System("the helper user has not been set up yet".into()))?;
+        let mut block: Vec<u16> = Vec::new();
+        if !env.is_empty() {
+            for e in merge_env(&user_environment(&user, &password)?, env) {
+                block.extend(e.encode_utf16());
+                block.push(0);
+            }
+            block.push(0);
+        }
         let user_w = w(&user);
         let domain_w = w(".");
         let pass_w = w(&password);
@@ -653,8 +731,8 @@ mod imp {
                 LOGON_WITH_PROFILE,
                 app_w.as_ptr(),
                 cmd_w.as_mut_ptr(),
-                CREATE_UNICODE_ENVIRONMENT,
-                null(),
+                CREATE_UNICODE_ENVIRONMENT | if suspended { CREATE_SUSPENDED } else { 0 },
+                if block.is_empty() { null() } else { block.as_ptr().cast() },
                 cwd_w.as_ref().map_or(null(), |c| c.as_ptr()),
                 &si,
                 &mut pi,
@@ -665,9 +743,7 @@ mod imp {
                     std::io::Error::last_os_error()
                 )));
             }
-            CloseHandle(pi.hThread);
-            CloseHandle(pi.hProcess);
-            Ok(pi.dwProcessId)
+            Ok(pi)
         }
     }
 

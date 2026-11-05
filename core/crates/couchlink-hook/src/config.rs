@@ -41,6 +41,10 @@ pub struct HookConfig {
     /// lock renaming (locks get the suffix of the first process, so launcher and game still see each other's
     /// objects). Programs under the Windows folder are left alone. Off by default.
     pub hook_children: bool,
+    /// With `hook_children`: only children whose exe has one of these names (`gameoverlayui64.exe`) get the DLL.
+    /// Empty: every child does.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub children_only: Vec<String>,
     /// Device paths of this copy's own controllers (as SDL, Raw Input or SetupAPI report them). When set, every other
     /// game controller is hidden from the copy's DirectInput, Raw Input and HID opens, so a game that reads pads
     /// without XInput still sees only its player's. `Some(vec![])` hides them all; `None` leaves them alone.
@@ -50,6 +54,13 @@ pub struct HookConfig {
     /// named: the one that does not fit is skipped).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub preload: Vec<PathBuf>,
+    /// Object names Steam uses the same in every Steam (its overlay channels), renamed with `steam_suffix` in a seat's
+    /// own Steam and in that seat's game copy, so they talk to each other and not to the Steam of the person at the PC.
+    /// Covers mutexes, events, semaphores and shared memory (substring match, case-insensitive).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub steam_names: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub steam_suffix: Option<String>,
 }
 
 /// Switches that are not part of the launch contract.
@@ -179,8 +190,14 @@ mod tests {
             hook_children: true,
             own_pads: Some(vec![r"\?\HID#VID_054C&PID_0CE6#1#{4d1e55b2}".into()]),
             preload: vec![PathBuf::from("C:/Steam/GameOverlayRenderer64.dll")],
+            children_only: vec!["gameoverlayui64.exe".into()],
+            steam_names: vec!["SteamXInput".into()],
+            steam_suffix: Some("_couchlink_seat2".into()),
         };
         let m = config_message(&cfg, &HookOptions::default());
+        assert_eq!(m["config"]["children_only"][0], "gameoverlayui64.exe");
+        assert_eq!(m["config"]["steam_names"][0], "SteamXInput");
+        assert_eq!(m["config"]["steam_suffix"], "_couchlink_seat2");
         assert_eq!(m["cmd"], "config");
         assert_eq!(m["config"]["pad"], 2);
         assert_eq!(m["config"]["xinput"], true);

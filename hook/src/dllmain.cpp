@@ -119,6 +119,14 @@ bool ParseConfig(const Json& j, Config& cfg, std::string& err) {
     if (const Json* v = j.get("kbm_feed"); v && v->isStr() && !v->s.empty()) cfg.kbm_feed = Widen(v->s);
     if (const Json* v = j.get("fake_cursor")) cfg.fake_cursor = v->asBool(false);
     if (const Json* v = j.get("hook_children")) cfg.hook_children = v->asBool(false);
+    if (const Json* v = j.get("children_only"); v && v->isArr()) {
+        for (const Json& n : v->a) {
+            if (!n.isStr() || n.s.empty()) continue;
+            std::wstring w = Widen(n.s);
+            for (auto& ch : w) ch = static_cast<wchar_t>(towlower(ch));
+            cfg.children_only.push_back(w);
+        }
+    }
     if (const Json* v = j.get("own_pads"); v && v->isArr()) {
         cfg.hide_pads = true;
         for (const Json& p : v->a) {
@@ -136,6 +144,12 @@ bool ParseConfig(const Json& j, Config& cfg, std::string& err) {
         for (const Json& p : v->a)
             if (p.isStr() && !p.s.empty()) cfg.preload.push_back(Widen(p.s));
     }
+    if (const Json* v = j.get("steam_names"); v && v->isArr()) {
+        for (const Json& n : v->a)
+            if (n.isStr() && !n.s.empty()) cfg.steam_names.push_back(Widen(n.s));
+    }
+    if (const Json* v = j.get("steam_suffix"); v && v->isStr()) cfg.steam_suffix = Widen(v->s);
+    if (cfg.steam_suffix.empty()) cfg.steam_names.clear();
     if (const Json* v = j.get("copy_id")) cfg.copy_id = v->isNum() ? static_cast<uint32_t>(v->asInt(0)) : 0;
     if (const Json* v = j.get("depth")) cfg.depth = v->isNum() ? static_cast<uint32_t>(v->asInt(0)) : 0;
     cfg.raw = j;

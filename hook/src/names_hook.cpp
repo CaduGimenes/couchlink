@@ -2,6 +2,11 @@
 // game can start while the first runs. A name is renamed when it contains one of the configured strings
 // (case-insensitive); the entry "*" renames every named mutex (not events or semaphores).
 //
+// Steam's own channels: `steam_names` (mutexes, events, semaphores and shared memory) get the fixed `steam_suffix`
+// instead. A seat's own Steam and that seat's game copy both get it, so the overlay channels Steam names the same in
+// every Steam (GameOverlayRender_PIDStream, ...) are their own and not the ones the Steam of the person at the PC
+// made first.
+//
 // ProtoInput's RenameHandlesHook (MIT, see THIRD_PARTY.md) does this at the Nt level; this version hooks the
 // documented Create/Open entry points in kernelbase.
 #include <cwchar>
@@ -11,7 +16,7 @@
 namespace cl {
 namespace {
 
-enum class Kind { Mutex, Event, Semaphore };
+enum class Kind { Mutex, Event, Semaphore, Section };
 
 std::wstring g_suffix_w;
 std::string g_suffix_a;
@@ -40,8 +45,15 @@ bool IsSystemName(const std::wstring& n) {
     return false;
 }
 
+bool IsSteamName(const std::wstring& name) {
+    if (EndsWithNoCase(name, g_cfg.steam_suffix)) return false;
+    for (const auto& n : g_cfg.steam_names)
+        if (ContainsNoCase(name, n)) return true;
+    return false;
+}
+
 bool ShouldRename(const std::wstring& name, Kind kind) {
-    if (name.empty() || EndsWithNoCase(name, g_suffix_w)) return false;
+    if (kind == Kind::Section || g_suffix_w.empty() || name.empty() || EndsWithNoCase(name, g_suffix_w)) return false;
     for (const auto& l : g_cfg.locks)
         if (ContainsNoCase(name, l)) return true;
     return g_cfg.locks_all && kind == Kind::Mutex && !IsSystemName(name);
@@ -51,8 +63,13 @@ bool ShouldRename(const std::wstring& name, Kind kind) {
 bool RenameW(LPCWSTR name, Kind kind, std::wstring& out) {
     if (!name || !*name) return false;
     std::wstring n(name);
-    if (!ShouldRename(n, kind)) return false;
-    out = n + g_suffix_w;
+    if (IsSteamName(n)) {
+        out = n + g_cfg.steam_suffix;
+    } else if (ShouldRename(n, kind)) {
+        out = n + g_suffix_w;
+    } else {
+        return false;
+    }
     Bump(C_NAMES_RENAMED);
     return true;
 }
@@ -60,8 +77,13 @@ bool RenameW(LPCWSTR name, Kind kind, std::wstring& out) {
 bool RenameA(LPCSTR name, Kind kind, std::string& out) {
     if (!name || !*name) return false;
     std::wstring w = Widen(std::string(name));  // ANSI names in practice are ASCII; good enough for matching
-    if (!ShouldRename(w, kind)) return false;
-    out = std::string(name) + g_suffix_a;
+    if (IsSteamName(w)) {
+        out = std::string(name) + Narrow(g_cfg.steam_suffix);
+    } else if (ShouldRename(w, kind)) {
+        out = std::string(name) + g_suffix_a;
+    } else {
+        return false;
+    }
     Bump(C_NAMES_RENAMED);
     return true;
 }
@@ -91,6 +113,10 @@ HANDLE(WINAPI* o_CreateSemaphoreExW)(LPSECURITY_ATTRIBUTES, LONG, LONG, LPCWSTR,
 HANDLE(WINAPI* o_CreateSemaphoreExA)(LPSECURITY_ATTRIBUTES, LONG, LONG, LPCSTR, DWORD, DWORD) = nullptr;
 HANDLE(WINAPI* o_OpenSemaphoreW)(DWORD, BOOL, LPCWSTR) = nullptr;
 HANDLE(WINAPI* o_OpenSemaphoreA)(DWORD, BOOL, LPCSTR) = nullptr;
+HANDLE(WINAPI* o_CreateFileMappingW)(HANDLE, LPSECURITY_ATTRIBUTES, DWORD, DWORD, DWORD, LPCWSTR) = nullptr;
+HANDLE(WINAPI* o_CreateFileMappingA)(HANDLE, LPSECURITY_ATTRIBUTES, DWORD, DWORD, DWORD, LPCSTR) = nullptr;
+HANDLE(WINAPI* o_OpenFileMappingW)(DWORD, BOOL, LPCWSTR) = nullptr;
+HANDLE(WINAPI* o_OpenFileMappingA)(DWORD, BOOL, LPCSTR) = nullptr;
 
 HANDLE WINAPI d_CreateMutexW(LPSECURITY_ATTRIBUTES sa, BOOL own, LPCWSTR name) {
     W_ARG(Kind::Mutex, name);
@@ -165,6 +191,23 @@ HANDLE WINAPI d_OpenSemaphoreA(DWORD access, BOOL inherit, LPCSTR name) {
     return o_OpenSemaphoreA(access, inherit, name);
 }
 
+HANDLE WINAPI d_CreateFileMappingW(HANDLE file, LPSECURITY_ATTRIBUTES sa, DWORD protect, DWORD hi, DWORD lo, LPCWSTR name) {
+    W_ARG(Kind::Section, name);
+    return o_CreateFileMappingW(file, sa, protect, hi, lo, name);
+}
+HANDLE WINAPI d_CreateFileMappingA(HANDLE file, LPSECURITY_ATTRIBUTES sa, DWORD protect, DWORD hi, DWORD lo, LPCSTR name) {
+    A_ARG(Kind::Section, name);
+    return o_CreateFileMappingA(file, sa, protect, hi, lo, name);
+}
+HANDLE WINAPI d_OpenFileMappingW(DWORD access, BOOL inherit, LPCWSTR name) {
+    W_ARG(Kind::Section, name);
+    return o_OpenFileMappingW(access, inherit, name);
+}
+HANDLE WINAPI d_OpenFileMappingA(DWORD access, BOOL inherit, LPCSTR name) {
+    A_ARG(Kind::Section, name);
+    return o_OpenFileMappingA(access, inherit, name);
+}
+
 // Most Create/Open functions live in kernelbase.dll; some ANSI ones are only exported by kernel32.dll.
 HMODULE g_kb = nullptr;
 HMODULE g_k32 = nullptr;
@@ -177,9 +220,12 @@ bool InstallEither(const char* name, void* detour, void** original) {
 }  // namespace
 
 void InstallNames() {
-    if (g_cfg.locks.empty() && !g_cfg.locks_all) return;
-    g_suffix_a = "_cl" + std::to_string(CopyId());
-    g_suffix_w = Widen(g_suffix_a);
+    bool locks = !g_cfg.locks.empty() || g_cfg.locks_all;
+    if (!locks && g_cfg.steam_names.empty()) return;
+    if (locks) {
+        g_suffix_a = "_cl" + std::to_string(CopyId());
+        g_suffix_w = Widen(g_suffix_a);
+    }
     g_kb = GetModuleHandleW(L"kernelbase.dll");
     g_k32 = GetModuleHandleW(L"kernel32.dll");
     HMODULE k = nullptr;
@@ -201,6 +247,31 @@ void InstallNames() {
     HK(k, CreateSemaphoreExA);
     HK(k, OpenSemaphoreW);
     HK(k, OpenSemaphoreA);
+    if (!g_cfg.steam_names.empty()) {
+        // A seat's Steam (not its children or games) shows it got its own channels: Couchlink checks for this event.
+        wchar_t exe[MAX_PATH] = L"";
+        GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        const wchar_t* base = wcsrchr(exe, L'\\');
+        if (base && _wcsicmp(base + 1, L"steam.exe") == 0) {
+            std::wstring marker = L"Couchlink_SteamChannels" + g_cfg.steam_suffix;
+            CreateEventW(nullptr, TRUE, FALSE, marker.c_str());  // kept open for the life of Steam
+        }
+        // A program that Steam started (its browser, its overlay window for a game) finds its Steam by the name Steam
+        // got on its command line (-master_ipc_name_override), which does not reach the programs it starts: without it
+        // they talk to the other Steam, and the browser dies when that Steam starts a game. The suffix is "_" + the name.
+        // Each program the hook followed into shows it (Couchlink's checks look for this event).
+        if (g_cfg.depth > 0) {
+            std::wstring mark = L"Couchlink_Hooked_" + std::to_wstring(GetCurrentProcessId());
+            CreateEventW(nullptr, TRUE, FALSE, mark.c_str());
+        }
+        if (g_cfg.depth > 0 && base && (_wcsnicmp(base + 1, L"gameoverlayui", 13) == 0 || _wcsicmp(base + 1, L"steamwebhelper.exe") == 0) &&
+            g_cfg.steam_suffix.size() > 1 && !GetEnvironmentVariableW(L"steam_master_ipc_name_override", nullptr, 0))
+            SetEnvironmentVariableW(L"steam_master_ipc_name_override", g_cfg.steam_suffix.c_str() + 1);
+        HK(k, CreateFileMappingW);
+        HK(k, CreateFileMappingA);
+        HK(k, OpenFileMappingW);
+        HK(k, OpenFileMappingA);
+    }
     g_features.names = true;
 }
 

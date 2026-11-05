@@ -103,3 +103,13 @@ fn active_value(name: &str) -> Option<u32> {
     let r = unsafe { RegGetValueW(HKEY_CURRENT_USER, sub.as_ptr(), val.as_ptr(), RRF_RT_REG_DWORD, null_mut(), (&mut data as *mut u32).cast(), &mut size) };
     (r == 0).then_some(data)
 }
+
+#[cfg(all(test, windows))]
+mod tests {
+    /// By hand on a PC whose Steam runs: `cargo test -p couchlink-steam owner_steam_is_seen -- --ignored`.
+    #[test]
+    #[ignore = "needs Steam running on this PC"]
+    fn owner_steam_is_seen() {
+        assert!(super::owner_steam_running(), "your Steam runs, so it must be seen");
+    }
+}

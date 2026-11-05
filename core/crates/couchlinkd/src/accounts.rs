@@ -64,9 +64,154 @@ pub fn open(seat: usize) -> Result<(), String> {
     if !couchlink_steam::accounts_ready(&cfg) {
         return Err(format!("Player {} has no Steam account set up yet", seat + 1));
     }
+    start_steam(&cfg, seat)
+}
+
+/// Starts the seat's own Steam, or shows its window when it runs. On Windows a Steam Couchlink starts gets the hook
+/// with only its overlay channels renamed ([`couchlink_steam::OVERLAY_CHANNELS`]), so the Shift+Tab overlay works in
+/// that seat's games while the Steam of the person at the PC runs too.
+pub fn start_steam(cfg: &couchlink_steam::AccountsConfig, seat: usize) -> Result<(), String> {
     let log = seat_steam_log(seat);
+    #[cfg(windows)]
+    owner_steam_first()?;
+    #[cfg(windows)]
+    if !couchlink_steam::accounts_steam_running(cfg) {
+        crate::logfile::write("info", &format!("starting player {}'s own Steam with its own overlay channels", seat + 1));
+        match start_hooked_steam(cfg) {
+            Ok(()) => return Ok(()),
+            Err(e) => crate::logfile::write("warn", &format!("player {}'s Steam starts without its own overlay channels: {e}", seat + 1)),
+        }
+    }
     crate::logfile::write("info", &format!("starting player {}'s own Steam (its output: {})", seat + 1, log.display()));
-    couchlink_steam::accounts_start_steam_logged(&cfg, true, Some(&log)).map(|_| ()).map_err(|e| e.user_message())
+    couchlink_steam::accounts_start_steam_logged(cfg, true, Some(&log)).map(|_| ()).map_err(|e| e.user_message())
+}
+
+/// The Steam of the person at the PC (player 1's) has to be up and signed in before a player's own Steam runs: started
+/// while one runs it quits at once, and signing in while one runs it crashes. So a player's Steam that runs without it
+/// is closed for that moment (it is started again when its player needs it), and this waits for the sign-in. Nothing
+/// happens when Steam is not installed or player 1's is signed in already. An error says what the person has to do.
+#[cfg(windows)]
+pub fn owner_steam_first() -> Result<(), String> {
+    use couchlink_steam::owner::{active_account, owner_steam_running, start_owner_steam};
+    use std::time::{Duration, Instant};
+    let until = |secs: u64, done: &dyn Fn() -> bool| {
+        let start = Instant::now();
+        while !done() && start.elapsed() < Duration::from_secs(secs) {
+            std::thread::sleep(Duration::from_millis(250));
+        }
+        done()
+    };
+    if couchlink_steam::steam_root().is_none() || (owner_steam_running() && active_account().is_some()) {
+        return Ok(());
+    }
+    let running: Vec<usize> = (1..couchlink_core::MAX_SEATS)
+        .filter(|&s| config(s).ok().is_some_and(|c| couchlink_steam::accounts_ready(&c) && couchlink_steam::accounts_steam_running(&c)))
+        .collect();
+    for &seat in &running {
+        crate::logfile::write("info", &format!("closing player {}'s own Steam for a moment: yours signs in first", seat + 1));
+        close(seat)?;
+    }
+    until(20, &|| !running.iter().any(|&s| config(s).is_ok_and(|c| couchlink_steam::accounts_steam_running(&c))));
+    if !owner_steam_running() {
+        crate::logfile::write("info", "starting your Steam for player 1");
+        start_owner_steam().map_err(|e| format!("cannot start your Steam: {e}"))?;
+        if !until(30, &owner_steam_running) {
+            return Err("your Steam did not start".to_string());
+        }
+    }
+    if !until(45, &|| active_account().is_some()) {
+        return Err("sign in to your Steam first, then start again".to_string());
+    }
+    // Steam takes a moment after signing in before games can talk to it.
+    std::thread::sleep(Duration::from_secs(3));
+    Ok(())
+}
+
+/// True when the seat's Steam runs with its own overlay channels (a Steam Couchlink started with the hook).
+#[cfg(windows)]
+pub fn steam_has_own_channels(cfg: &couchlink_steam::AccountsConfig) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ACCESS_DENIED};
+    use windows_sys::Win32::System::Threading::{OpenEventW, SYNCHRONIZATION_SYNCHRONIZE};
+    let name: Vec<u16> = format!("{}{}", couchlink_steam::OVERLAY_MARKER, cfg.overlay_suffix()).encode_utf16().chain(std::iter::once(0)).collect();
+    // SAFETY: NUL terminated name; a handle we get is closed. The marker belongs to the seat's Windows user, so
+    // "access denied" also means it is there.
+    unsafe {
+        let h = OpenEventW(SYNCHRONIZATION_SYNCHRONIZE, 0, name.as_ptr());
+        if !h.is_null() {
+            CloseHandle(h);
+            return true;
+        }
+        GetLastError() == ERROR_ACCESS_DENIED
+    }
+}
+
+#[cfg(windows)]
+fn start_hooked_steam(cfg: &couchlink_steam::AccountsConfig) -> Result<(), String> {
+    let s = couchlink_steam::accounts_start_steam_suspended(cfg).map_err(|e| e.user_message())?;
+    let launched = couchlink_hook::Launched::adopt(s.process, s.thread, s.pid).map_err(|e| e.to_string())?;
+    let config = couchlink_hook::HookConfig {
+        steam_names: couchlink_steam::OVERLAY_CHANNELS.iter().map(|n| n.to_string()).collect(),
+        steam_suffix: Some(cfg.overlay_suffix()),
+        // Steam's overlay window (gameoverlayui64.exe) is a program Steam starts for each game; its browser draws the
+        // overlay in its GPU process. The browser's page processes are sandboxed and left alone.
+        hook_children: true,
+        children_only: vec![
+            "gameoverlayui64.exe".into(),
+            "gameoverlayui.exe".into(),
+            // Steam starts itself again after an update.
+            "steam.exe".into(),
+            // Steam's browser: only its main process, which reports its GPU process to Steam; its other processes are
+            // sandboxed and left alone.
+            "steamwebhelper.exe|!--type=".into(),
+        ],
+        // Both Steams share the Steam folder, and the first keeps its log files open: this one writes its own.
+        saves: seat_steam_logs(cfg).map(|logs| vec![(cfg.steam_exe.parent().unwrap_or(std::path::Path::new(".")).join("logs"), logs)]).unwrap_or_default(),
+        ..Default::default()
+    };
+    let options = couchlink_hook::HookOptions { xinput: false, test_pads: None };
+    let injected = shared_hook_dll(launched.is_x86())
+        .and_then(|dll| couchlink_hook::inject_as(&launched, &config, &options, &dll, Some(&cfg.user_name())).map_err(|e| e.to_string()));
+    // Without the hook it still runs (the overlay in its games stays off while the other Steam runs).
+    couchlink_hook::resume(&launched).map_err(|e| e.to_string())?;
+    injected.map(|_| ())
+}
+
+/// Where a seat's own Steam writes its logs (`%ProgramData%\Couchlink\steam-logs\seat<n>`), made writable for that seat's
+/// Windows user. None when it cannot be made.
+#[cfg(windows)]
+fn seat_steam_logs(cfg: &couchlink_steam::AccountsConfig) -> Option<std::path::PathBuf> {
+    let root = std::env::var_os("ProgramData").map(std::path::PathBuf::from)?;
+    let dir = root.join("Couchlink").join("steam-logs").join(format!("seat{}", cfg.seat as u32 + 1));
+    std::fs::create_dir_all(&dir).ok()?;
+    // The folder is ours, so changing who may write it needs no administrator.
+    let grant = format!("{}:(OI)(CI)M", cfg.user_name());
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let ok = std::process::Command::new("icacls")
+        .arg(&dir)
+        .args(["/grant", &grant])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .is_ok_and(|o| o.status.success());
+    ok.then_some(dir)
+}
+
+/// A copy of the hook DLL a seat's helper Windows user can read (`%ProgramData%\Couchlink\hook`): the one next to
+/// couchlinkd may sit in a folder only the person at the PC can open. Named after its content, so a copy that a
+/// running Steam has loaded is never overwritten.
+#[cfg(windows)]
+fn shared_hook_dll(x86: bool) -> Result<std::path::PathBuf, String> {
+    let src = couchlink_hook::dll::dll_path(x86).map_err(|e| e.to_string())?;
+    let bytes = std::fs::read(&src).map_err(|e| format!("cannot read {}: {e}", src.display()))?;
+    let hash = bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x100_0000_01b3));
+    let root = std::env::var_os("ProgramData").map(std::path::PathBuf::from).ok_or("ProgramData is not set")?;
+    let dir = root.join("Couchlink").join("hook");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot make {}: {e}", dir.display()))?;
+    let dst = dir.join(format!("couchlink_hook_{}_{hash:016x}.dll", if x86 { "x86" } else { "x64" }));
+    if std::fs::metadata(&dst).map(|m| m.len()).ok() != Some(bytes.len() as u64) {
+        std::fs::write(&dst, &bytes).map_err(|e| format!("cannot write {}: {e}", dst.display()))?;
+    }
+    Ok(dst)
 }
 
 /// Player 1's Steam (the PC owner's): its folder, whether that was picked by hand, and whether it runs signed in.

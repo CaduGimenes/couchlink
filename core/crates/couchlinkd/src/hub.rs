@@ -906,7 +906,16 @@ impl Hub {
             }
             Command::CreateShortcut { recipe } => self.create_shortcut(&recipe),
             Command::AddToSteam { recipe } => self.add_to_steam(&recipe),
-            Command::OpenSteamAccount { seat } => crate::accounts::open(seat).map(|_| none),
+            Command::OpenSteamAccount { seat } => {
+                // Waits for player 1's Steam to sign in first: off the hub task, a failure comes as a log line.
+                let tx = self.self_tx.clone();
+                std::thread::spawn(move || {
+                    if let Err(e) = crate::accounts::open(seat) {
+                        let _ = tx.send(HubMsg::Note(LogLevel::Warn, format!("Player {}'s Steam: {e}", seat + 1)));
+                    }
+                });
+                Ok(none)
+            }
             Command::SetupSteamAccount { seat } => self.steam_account_step("setup", seat),
             Command::RemoveSteamAccount { seat } => self.steam_account_step("remove", seat),
             Command::DebugKeys { device, keys } => {

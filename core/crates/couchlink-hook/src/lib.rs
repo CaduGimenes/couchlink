@@ -27,7 +27,7 @@ mod sec;
 #[cfg(windows)]
 mod sys;
 #[cfg(windows)]
-pub use sys::{HookHandle, Launched, inject, inject_with, join_args, launch_suspended, resume};
+pub use sys::{HookHandle, Launched, inject, inject_as, inject_with, join_args, launch_suspended, resume};
 
 #[cfg(not(windows))]
 mod unsupported;

@@ -81,13 +81,25 @@ pub fn install(name: &str, x86: bool, dir: &Path) -> Result<PathBuf> {
 }
 
 /// Removes a stand-in installed by `install`. Does nothing for a file that is not ours or is gone already; an error
-/// when the file is still loaded by a running game.
+/// when the file is still loaded by a running game after `UNINSTALL_WAIT`: a game that was just ended holds on to it
+/// for some seconds more.
 pub fn uninstall(path: &Path) -> Result<()> {
     if !path.exists() || !is_ours(path) {
         return Ok(());
     }
-    std::fs::remove_file(path).map_err(|e| HookError::io(format!("remove {}", path.display()), e))
+    let until = std::time::Instant::now() + UNINSTALL_WAIT;
+    loop {
+        match std::fs::remove_file(path) {
+            Ok(()) => return Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) if std::time::Instant::now() >= until => return Err(HookError::io(format!("remove {}", path.display()), e)),
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(200)),
+        }
+    }
 }
+
+/// How long `uninstall` keeps trying.
+const UNINSTALL_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// The outcome of `pick`.
 #[derive(Debug, Clone, PartialEq)]
@@ -349,6 +361,28 @@ mod tests {
         uninstall(&other).unwrap();
         uninstall(&ours).unwrap();
         assert!(!ours.exists() && other.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn uninstall_waits_for_a_game_that_is_still_letting_go() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = std::env::temp_dir().join(format!("cl-proxy-held-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let utf16: Vec<u8> = "xx Couchlink input hook (loads as version.dll)".encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let held = dir.join("held.dll");
+        std::fs::write(&held, [b"MZ".as_slice(), &utf16].concat()).unwrap();
+        // Like a loaded DLL: others may read it (share read) but not delete it, until it is let go of a little later.
+        let file = std::fs::OpenOptions::new().read(true).share_mode(1).open(&held).unwrap();
+        assert!(std::fs::remove_file(&held).is_err(), "the held file should refuse being deleted");
+        let letting_go = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(700));
+            drop(file);
+        });
+        uninstall(&held).unwrap();
+        letting_go.join().unwrap();
+        assert!(!held.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

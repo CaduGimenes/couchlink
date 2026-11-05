@@ -349,6 +349,32 @@ bool UnderWindowsDir(HANDLE p) {
     return PathUnder(std::wstring(image, n), std::wstring(win, w));
 }
 
+// False when `children_only` names programs and this child is not one of them. An entry is an exe name, optionally
+// with "|text" (its command line must contain text) or "|!text" (must not): Steam's browser is hooked only in its
+// main and GPU processes, not in its sandboxed page processes.
+bool Wanted(HANDLE p, const std::wstring& cmd) {
+    if (g_cfg.children_only.empty()) return true;
+    wchar_t image[MAX_PATH * 2];
+    DWORD n = ARRAYSIZE(image);
+    if (!QueryFullProcessImageNameW(p, 0, image, &n)) return false;
+    std::wstring name(image, n);
+    size_t slash = name.find_last_of(L"\\/");
+    if (slash != std::wstring::npos) name = name.substr(slash + 1);
+    for (auto& ch : name) ch = static_cast<wchar_t>(towlower(ch));
+    std::wstring line = cmd;
+    for (auto& ch : line) ch = static_cast<wchar_t>(towlower(ch));
+    for (const auto& w : g_cfg.children_only) {
+        size_t bar = w.find(L'|');
+        if (name != w.substr(0, bar)) continue;
+        if (bar == std::wstring::npos) return true;
+        std::wstring text = w.substr(bar + 1);
+        bool negate = !text.empty() && text[0] == L'!';
+        if (negate) text = text.substr(1);
+        if ((line.find(text) != std::wstring::npos) != negate) return true;
+    }
+    return false;
+}
+
 void Record(Child c) {
     Lock l;
     if (g_children.size() >= 64) {
@@ -359,7 +385,7 @@ void Record(Child c) {
 }
 
 // Hooks one freshly created (suspended) child. `caller_suspended`: the caller asked for CREATE_SUSPENDED itself.
-void HookChild(const PROCESS_INFORMATION& pi, bool caller_suspended) {
+void HookChild(const PROCESS_INFORMATION& pi, bool caller_suspended, const std::wstring& cmd) {
     Child rec;
     rec.pid = pi.dwProcessId;
     std::string err;
@@ -376,7 +402,7 @@ void HookChild(const PROCESS_INFORMATION& pi, bool caller_suspended) {
         if (self_wow && !wow) err = "a 32-bit process cannot hook a 64-bit child";
     }
     rec.arch = child32 ? "x86" : "x64";
-    if (err.empty() && UnderWindowsDir(pi.hProcess)) {
+    if (err.empty() && (UnderWindowsDir(pi.hProcess) || !Wanted(pi.hProcess, cmd))) {
         skip = true;
         Bump(C_CHILDREN_SKIPPED);
     }
@@ -417,7 +443,7 @@ BOOL WINAPI d_CreateProcessW(LPCWSTR app, LPWSTR cmd, LPSECURITY_ATTRIBUTES pa, 
     LPPROCESS_INFORMATION out = pi ? pi : &local;
     BOOL ok = o_CreateProcessW(app, cmd, pa, ta, inherit, flags | CREATE_SUSPENDED, env, cwd, si, out);
     if (ok) {
-        HookChild(*out, (flags & CREATE_SUSPENDED) != 0);
+        HookChild(*out, (flags & CREATE_SUSPENDED) != 0, cmd ? std::wstring(cmd) : app ? std::wstring(app) : std::wstring());
         if (!pi) {
             CloseHandle(local.hProcess);
             CloseHandle(local.hThread);
@@ -436,7 +462,7 @@ BOOL WINAPI d_CreateProcessA(LPCSTR app, LPSTR cmd, LPSECURITY_ATTRIBUTES pa, LP
     LPPROCESS_INFORMATION out = pi ? pi : &local;
     BOOL ok = o_CreateProcessA(app, cmd, pa, ta, inherit, flags | CREATE_SUSPENDED, env, cwd, si, out);
     if (ok) {
-        HookChild(*out, (flags & CREATE_SUSPENDED) != 0);
+        HookChild(*out, (flags & CREATE_SUSPENDED) != 0, Widen(cmd ? std::string(cmd) : app ? std::string(app) : std::string()));
         if (!pi) {
             CloseHandle(local.hProcess);
             CloseHandle(local.hThread);

@@ -14,6 +14,8 @@ namespace cl {
 namespace {
 
 std::atomic<bool> g_open{false};
+// Until then the copy's real keyboard and mouse reach it although it has a feed: the overlay reads only those.
+std::atomic<ULONGLONG> g_real_until{0};
 
 #ifdef _WIN64
 const wchar_t kApi[] = L"steam_api64.dll";
@@ -63,15 +65,23 @@ DWORD WINAPI OpenOverlay(LPVOID) {
 
 }  // namespace
 
+bool SteamOverlayTakesRealInput() {
+    return g_open.load() || GetTickCount64() < g_real_until.load();
+}
+
 void SteamOverlayKey(uint16_t vk, bool shift) {
     if (g_cfg.preload.empty()) return;
     if (vk == VK_ESCAPE) {
-        g_open = false;
+        if (g_open.exchange(false)) g_real_until = GetTickCount64() + 1500;
         return;
     }
     if (vk != VK_TAB || !shift) return;
     // Shift+Tab again closes it: the copy is in front by then, so the overlay takes that one from the keyboard itself.
-    if (g_open.exchange(!g_open.load())) return;
+    // The real keys keep reaching the copy a moment longer, since this feed event may come before them.
+    if (g_open.exchange(!g_open.load())) {
+        g_real_until = GetTickCount64() + 1500;
+        return;
+    }
     HANDLE t = CreateThread(nullptr, 0, OpenOverlay, nullptr, 0, nullptr);
     if (t) CloseHandle(t);
 }

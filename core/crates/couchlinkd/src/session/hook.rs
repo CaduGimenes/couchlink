@@ -192,6 +192,7 @@ impl Launcher for HookLauncher {
             // Games that read controllers through DirectInput, Raw Input or HID see only this seat's.
             own_pads: Some(own_pad_paths(&spec.devices)),
             preload: spec.preload.clone(),
+            ..Default::default()
         };
         if let Some(s) = stand_in_for(spec) {
             if let Some(launched) = launch_with_stand_in(spec, &s, &config, &mut feed, &mut kbm)? {
@@ -317,6 +318,10 @@ fn launch_as_seat_user(spec: &LaunchSpec, account: &couchlink_steam::AccountsCon
         hook_children: spec.hook_children,
         own_pads: Some(own_pad_paths(&spec.devices)),
         preload: spec.preload.clone(),
+        // The overlay channels of this seat's own Steam (see couchlink_steam::OVERLAY_CHANNELS).
+        steam_names: couchlink_steam::OVERLAY_CHANNELS.iter().map(|n| n.to_string()).collect(),
+        steam_suffix: spec.run_as.as_ref().map(|a| a.overlay_suffix()),
+        ..Default::default()
     };
     let s = stand_in_for(spec).ok_or_else(|| {
         format!("{} cannot run on its own Steam account yet: none of Couchlink's stand-in DLLs fits it", spec.exe.display())

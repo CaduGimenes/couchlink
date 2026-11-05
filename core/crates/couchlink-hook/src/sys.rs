@@ -84,6 +84,25 @@ impl std::fmt::Debug for Launched {
 }
 
 impl Launched {
+    /// Takes over a process another API started suspended (a seat's Steam, started as that seat's Windows user): its
+    /// handles are owned from now on, and it is run to its entry point like one `launch_suspended` started.
+    pub fn adopt(process: isize, thread: isize, pid: u32) -> Result<Launched> {
+        let launched = Launched { pid, x86: false, process: Owned(process as HANDLE), thread: Owned(thread as HANDLE) };
+        let mut wow = 0i32;
+        // SAFETY: valid process handle.
+        if unsafe { IsWow64Process(launched.process.0, &mut wow) } == 0 {
+            let e = HookError::last("IsWow64Process");
+            launched.terminate();
+            return Err(e);
+        }
+        let launched = Launched { x86: wow != 0, ..launched };
+        if let Err(e) = run_to_entry(&launched) {
+            launched.terminate();
+            return Err(e);
+        }
+        Ok(launched)
+    }
+
     pub fn pid(&self) -> u32 {
         self.pid
     }
@@ -485,6 +504,7 @@ fn run_to_runtime(l: &Launched) -> Result<()> {
 
 /// Base address of a module in the target, by file name.
 fn remote_module_base(l: &Launched, name: &str) -> Result<usize> {
+    const ERROR_ACCESS_DENIED: u32 = 5;
     let flags = if l.x86 { TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32 } else { TH32CS_SNAPMODULE };
     let mut last = 0;
     for _ in 0..100 {
@@ -493,6 +513,11 @@ fn remote_module_base(l: &Launched, name: &str) -> Result<usize> {
         if snap == INVALID_HANDLE_VALUE {
             // SAFETY: no preconditions.
             last = unsafe { GetLastError() };
+            // A process of another Windows user (a seat's Steam) cannot be listed; its loader list can still be read
+            // through the handle we started it with.
+            if last == ERROR_ACCESS_DENIED {
+                return loader_module_base(l, name);
+            }
             std::thread::sleep(Duration::from_millis(10));
             continue;
         }
@@ -514,6 +539,64 @@ fn remote_module_base(l: &Launched, name: &str) -> Result<usize> {
         std::thread::sleep(Duration::from_millis(10));
     }
     Err(HookError::Protocol(format!("{name} is not loaded in the target (last error {last})")))
+}
+
+/// Base address of module `name` (lower case) in the target, from the loader's list of loaded modules in its PEB
+/// (PEB.Ldr.InLoadOrderModuleList), read through the process handle.
+fn loader_module_base(l: &Launched, name: &str) -> Result<usize> {
+    // Offsets of PEB.Ldr, PEB_LDR_DATA.InLoadOrderModuleList, LDR_DATA_TABLE_ENTRY.DllBase and .BaseDllName.
+    let (ptr, ldr_at, list_at, base_at, name_at) = if l.x86 { (4, 0x0c, 0x0c, 0x18, 0x2c) } else { (8, 0x18, 0x10, 0x30, 0x58) };
+    let read_ptr = |addr: usize| -> Result<usize> {
+        let mut b = [0u8; 8];
+        read_mem(l, addr, &mut b[..ptr])?;
+        Ok(u64::from_le_bytes(b) as usize)
+    };
+    let peb = if l.x86 {
+        let mut peb32 = 0usize;
+        // ProcessWow64Information = 26
+        // SAFETY: the out buffer is one usize.
+        let st = unsafe {
+            NtQueryInformationProcess(l.process.0, 26, &mut peb32 as *mut usize as *mut c_void, std::mem::size_of::<usize>() as u32, null_mut())
+        };
+        if st != 0 { 0 } else { peb32 }
+    } else {
+        // SAFETY: all-zero is a valid value for this plain struct.
+        let mut pbi: ProcessBasicInformation = unsafe { std::mem::zeroed() };
+        // SAFETY: pbi is a live buffer of the size passed.
+        let st = unsafe {
+            NtQueryInformationProcess(l.process.0, 0, &mut pbi as *mut ProcessBasicInformation as *mut c_void, std::mem::size_of::<ProcessBasicInformation>() as u32, null_mut())
+        };
+        if st != 0 { 0 } else { pbi.peb_base }
+    };
+    if peb == 0 {
+        return Err(HookError::Protocol("cannot find the target's PEB".into()));
+    }
+    for _ in 0..100 {
+        let ldr = read_ptr(peb + ldr_at)?;
+        if ldr != 0 {
+            let head = ldr + list_at;
+            let mut entry = read_ptr(head)?;
+            let mut guard = 0;
+            while entry != 0 && entry != head && guard < 512 {
+                guard += 1;
+                let mut us = [0u8; 2];
+                read_mem(l, entry + name_at, &mut us)?;
+                let len = u16::from_le_bytes(us) as usize;
+                let buf = read_ptr(entry + name_at + ptr)?;
+                if len > 0 && len < 520 && buf != 0 {
+                    let mut raw = vec![0u8; len];
+                    read_mem(l, buf, &mut raw)?;
+                    let wide: Vec<u16> = raw.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+                    if String::from_utf16_lossy(&wide).to_lowercase() == name {
+                        return read_ptr(entry + base_at);
+                    }
+                }
+                entry = read_ptr(entry)?;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    Err(HookError::Protocol(format!("{name} is not in the target's loader list")))
 }
 
 /// Address of an exported function of a module loaded in the target, found by reading its export table from the
@@ -580,7 +663,10 @@ struct Pipe {
 }
 
 impl Pipe {
-    fn create(pid: u32) -> Result<Pipe> {
+    /// The host end for process `pid`; `user` is one more Windows user that may connect (a process running as a seat's
+    /// helper user).
+    fn create_for(pid: u32, user: Option<&str>) -> Result<Pipe> {
+        let shared = user.map(crate::sec::SharedWith::user).transpose()?;
         let name = wide(OsStr::new(&format!(r"\\.\pipe\couchlink-hook-{pid}")));
         // SAFETY: name is NUL-terminated.
         let h = unsafe {
@@ -592,7 +678,7 @@ impl Pipe {
                 64 * 1024,
                 64 * 1024,
                 0,
-                null(),
+                shared.as_ref().map_or(null(), |s| s.as_ptr()),
             )
         };
         if h == INVALID_HANDLE_VALUE {
@@ -823,8 +909,14 @@ pub fn inject(l: &Launched, config: &HookConfig) -> Result<HookHandle> {
 
 /// Like `inject` with the extra switches in `HookOptions`.
 pub fn inject_with(l: &Launched, config: &HookConfig, options: &HookOptions) -> Result<HookHandle> {
-    let dll = dll_path(l.x86)?;
-    let mut pipe = Pipe::create(l.pid)?;
+    inject_as(l, config, options, &dll_path(l.x86)?, None)
+}
+
+/// `inject_with` for a process running as another Windows user (`user`): `dll` must be a copy of the hook DLL that
+/// user can read, and the pipe is opened to that user too.
+pub fn inject_as(l: &Launched, config: &HookConfig, options: &HookOptions, dll: &Path, user: Option<&str>) -> Result<HookHandle> {
+    let dll = dll.to_path_buf();
+    let mut pipe = Pipe::create_for(l.pid, user)?;
     // The exit code is the module handle cut to 32 bits: zero means LoadLibrary failed (or, rarely, a base address
     // with zero low bits), so the wait for the pipe is short in that case.
     let loaded = load_library_in_target(l, &dll)?;
