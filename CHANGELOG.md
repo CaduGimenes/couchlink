@@ -3,6 +3,19 @@
 What changed in each Couchlink release. Downloads and older notes are on the
 [releases page](https://github.com/cranebeaker/couchlink/releases).
 
+## 0.1.19
+
+### Added
+
+- **Couchlink remembers your last setup.** Starting a game saves who sat where with which devices, the screens and the
+  layout. The next time Couchlink starts, each device goes back to its seat as it connects, also a controller turned
+  on later, until you change a seat by hand.
+
+### Fixed
+
+- **The virtual display was drawn on top of your monitor** in Screens. It now sits next to the real monitors.
+- **The window could not be moved while a dialog was open.** Drag it by its top edge, as usual.
+
 ## 0.1.18
 
 ### Added
