@@ -327,7 +327,14 @@ pub struct SuspendedSteam {
 /// Start the seat's Steam as the helper user, suspended. Windows only.
 pub fn accounts_start_steam_suspended(cfg: &AccountsConfig) -> Result<SuspendedSteam> {
     check_name(cfg)?;
-    imp::start_steam_suspended(cfg)
+    #[cfg(target_os = "linux")]
+    {
+        Err(SteamError::Unsupported("a suspended Steam needs Windows".into()))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        imp::start_steam_suspended(cfg)
+    }
 }
 
 /// Start Steam as the helper user. Returns the process id of the new Steam. Only after confirmation.
