@@ -3,6 +3,34 @@
 What changed in each Couchlink release. Downloads and older notes are on the
 [releases page](https://github.com/cranebeaker/couchlink/releases).
 
+## 0.1.18
+
+### Added
+
+- **Games started from a launcher are added on the fly.** LaunchBox, Playnite and shortcuts can start any game with
+  `--play-exe`, and a game Couchlink does not know yet joins the Library first. A switch under Start from other apps
+  turns this off.
+- **Virtual display for streaming.** Screens can add a screen that exists only while a session plays on it, to stream
+  to a TV with Steam Link and the like.
+- **Show their Steam.** A player's own Steam that is already running gets its window shown, instead of being started
+  again.
+- Players shows a hint that four more seats open once the first four are taken (up to 8 players).
+
+### Fixed
+
+- **Shift+Tab did not open Steam's overlay for player 2.** A player on their own Steam account now gets their own
+  overlay in their own copy, next to player 1's.
+- **Shift+Tab again did not close the overlay.** It now closes it, for every player.
+- **Player 2's Steam window vanished when a session started.** Their Steam was talking to yours and fell over as soon
+  as a game started. Each Steam now keeps to its own.
+- **Stopping a session could report a failed undo** because a game that was just closed still held Couchlink's DLL.
+  Couchlink now waits for it to let go.
+
+### Changed
+
+- Sign in to your own Steam first: with players on their own accounts, Couchlink starts your Steam and waits for your
+  sign-in before starting theirs.
+
 ## 0.1.17
 
 ### Fixed
