@@ -434,9 +434,40 @@ mod win {
         }
     }
 
+    /// How long a window gets to answer. Windows only calls one hung after five seconds, far too late for a game whose
+    /// threads a mod has just paused to install itself.
+    const ANSWER_MS: u32 = 250;
+
+    /// Gone, hung, or not answering right now (loading, or paused by a mod). Such a window is left alone: `maintain`
+    /// tries again.
     fn hung(hwnd: HWND) -> bool {
-        // SAFETY: plain query.
-        unsafe { IsWindow(hwnd) == 0 || IsHungAppWindow(hwnd) != 0 }
+        // SAFETY: plain queries; the message does nothing and is given up on after ANSWER_MS.
+        unsafe {
+            IsWindow(hwnd) == 0
+                || IsHungAppWindow(hwnd) != 0
+                || SendMessageTimeoutW(hwnd, WM_NULL, 0, 0, SMTO_ABORTIFHUNG, ANSWER_MS, std::ptr::null_mut()) == 0
+        }
+    }
+
+    /// Sets a window's styles. Windows waits for the window's own thread to take that in, so it is done on a thread of
+    /// its own: a game that stops answering just then holds up that thread, not the session. False when it did.
+    fn set_styles(hwnd: HWND, style: isize, exstyle: isize) -> bool {
+        // SAFETY: plain queries.
+        let same = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) == style && GetWindowLongPtrW(hwnd, GWL_EXSTYLE) == exstyle };
+        if same {
+            return true;
+        }
+        let handle = hwnd as isize;
+        let (done, wait) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            // SAFETY: an invalid handle only makes these fail.
+            unsafe {
+                SetWindowLongPtrW(handle as HWND, GWL_STYLE, style);
+                SetWindowLongPtrW(handle as HWND, GWL_EXSTYLE, exstyle);
+            }
+            let _ = done.send(());
+        });
+        wait.recv_timeout(std::time::Duration::from_millis(ANSWER_MS as u64)).is_ok()
     }
 
     /// Style, position and size of `hwnd` to what the seat needs. Never touches a window that is not answering.
@@ -449,9 +480,8 @@ mod win {
             if IsZoomed(p.hwnd) != 0 || IsIconic(p.hwnd) != 0 {
                 ShowWindowAsync(p.hwnd, SW_RESTORE);
             }
-            if borderless {
-                SetWindowLongPtrW(p.hwnd, GWL_STYLE, (p.style as u32 & !BORDER_STYLE) as isize);
-                SetWindowLongPtrW(p.hwnd, GWL_EXSTYLE, (p.exstyle as u32 & !BORDER_EXSTYLE) as isize);
+            if borderless && !set_styles(p.hwnd, (p.style as u32 & !BORDER_STYLE) as isize, (p.exstyle as u32 & !BORDER_EXSTYLE) as isize) {
+                return;
             }
             SetWindowPos(
                 p.hwnd,
@@ -516,8 +546,9 @@ mod win {
         // SAFETY: calls on a window we changed earlier.
         unsafe {
             SetWindowPos(p.hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
-            SetWindowLongPtrW(p.hwnd, GWL_STYLE, p.style);
-            SetWindowLongPtrW(p.hwnd, GWL_EXSTYLE, p.exstyle);
+            if !set_styles(p.hwnd, p.style, p.exstyle) {
+                return;
+            }
             SetWindowPos(
                 p.hwnd,
                 std::ptr::null_mut(),
@@ -527,6 +558,78 @@ mod win {
                 p.rect.bottom - p.rect.top,
                 SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
             );
+        }
+    }
+
+    #[cfg(test)]
+    mod paused_game_tests {
+        use super::*;
+        use std::time::{Duration, Instant};
+
+        /// A real window on a thread of its own, which handles messages only when `pump` says so: a game whose threads
+        /// are paused does not.
+        fn window(pump: bool) -> HWND {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+                // SAFETY: a plain window of a system class, on this thread, with nothing borrowed after the call.
+                let hwnd = unsafe {
+                    CreateWindowExW(0, class.as_ptr(), std::ptr::null(), WS_OVERLAPPEDWINDOW, -4000, -4000, 300, 200, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null())
+                };
+                tx.send(hwnd as isize).unwrap();
+                let until = Instant::now() + Duration::from_secs(4);
+                while Instant::now() < until {
+                    if pump {
+                        // SAFETY: `msg` outlives the calls.
+                        unsafe {
+                            let mut msg: MSG = std::mem::zeroed();
+                            while PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
+                                DispatchMessageW(&msg);
+                            }
+                        }
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            });
+            rx.recv().unwrap() as HWND
+        }
+
+        const RECT: Rect = Rect { x: -3000, y: -3000, w: 640, h: 360 };
+
+        #[test]
+        fn a_window_that_does_not_answer_is_left_alone_and_holds_nothing_up() {
+            let hwnd = window(false);
+            let p = adopt(hwnd);
+            let start = Instant::now();
+            apply(&p, RECT, true);
+            assert!(start.elapsed() < Duration::from_secs(1), "took {:?}", start.elapsed());
+            let now = rect_of(hwnd).unwrap();
+            assert_ne!((now.x, now.w), (RECT.x, RECT.w), "not moved");
+            // SAFETY: plain query.
+            assert_ne!(unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) } as u32 & WS_CAPTION, 0, "its style is untouched");
+        }
+
+        #[test]
+        fn a_game_that_stops_answering_during_the_style_change_does_not_hold_up_the_session() {
+            let hwnd = window(false);
+            let start = Instant::now();
+            assert!(!set_styles(hwnd, (WS_POPUP | WS_VISIBLE) as isize, 0));
+            assert!(start.elapsed() < Duration::from_secs(1), "took {:?}", start.elapsed());
+        }
+
+        #[test]
+        fn a_window_that_answers_is_placed_without_borders() {
+            let hwnd = window(true);
+            let p = adopt(hwnd);
+            apply(&p, RECT, true);
+            let until = Instant::now() + Duration::from_secs(2);
+            while rect_of(hwnd).is_none_or(|r| (r.x, r.w) != (RECT.x, RECT.w)) && Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let now = rect_of(hwnd).unwrap();
+            assert_eq!((now.x, now.y, now.w, now.h), (RECT.x, RECT.y, RECT.w, RECT.h));
+            // SAFETY: plain query.
+            assert_eq!(unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) } as u32 & WS_CAPTION, 0);
         }
     }
 

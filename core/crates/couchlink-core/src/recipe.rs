@@ -239,11 +239,23 @@ pub struct WindowOpts {
     /// Frames per second the copies are held to when the player set no limit of their own (10 to 360).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fps_limit: Option<u32>,
+    /// Leave the copy's window alone until this says the game is ready. For games a mod pauses while it installs itself
+    /// (REFramework): changing the window at that moment can freeze them. After `wait_ms` the window is placed anyway.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub place_after: Option<PlaceAfter>,
+}
+
+/// `window.place_after`: a file in the copy's folder written since the copy started, with this text in it when given.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlaceAfter {
+    pub file: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contains: Option<String>,
 }
 
 impl Default for WindowOpts {
     fn default() -> WindowOpts {
-        WindowOpts { borderless: true, settle_ms: 4000, wait_ms: 60_000, exe: None, fps_limit: None }
+        WindowOpts { borderless: true, settle_ms: 4000, wait_ms: 60_000, exe: None, fps_limit: None, place_after: None }
     }
 }
 
@@ -508,6 +520,9 @@ impl Recipe {
             if !ok {
                 return Err(format!("window.exe {exe:?} must be an exe file name such as Game.exe"));
             }
+        }
+        if let Some(after) = &self.window.place_after {
+            check_relative(&after.file).map_err(|e| format!("window.place_after.file: {e}"))?;
         }
         Ok(())
     }

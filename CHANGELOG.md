@@ -15,6 +15,10 @@ What changed in each Couchlink release. Downloads and older notes are on the
 
 - **The virtual display was drawn on top of your monitor** in Screens. It now sits next to the real monitors.
 - **The window could not be moved while a dialog was open.** Drag it by its top edge, as usual.
+- **A game could stall if its window was changed while a mod had it paused** (seen with REFramework in Resident Evil 7).
+  Couchlink now leaves a window alone until it answers, tries again, and no longer waits on a game that stops answering.
+  Recipes can also hold placement back with the new `window.place_after`, until a file or a line in it appears.
+- **Copies on an exFAT or FAT32 drive failed with "Incorrect function".** The message now says copies need an NTFS drive.
 
 ## 0.1.18
 

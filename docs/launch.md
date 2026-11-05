@@ -101,6 +101,11 @@ Data only. Built-ins live in `recipes/`; user ones in `<state>/recipes/`.
 }
 ```
 
+`window.place_after` (optional) leaves a copy's window alone until the game is ready, for games a mod pauses while it installs
+itself (REFramework): `{ "file": "mod.log", "contains": "Ready" }`. `file` is relative to the copy's folder and must have been
+written since that copy started; `contains` is optional. Give each copy its own file (`files.copy`), since a linked file is
+shared with the other copies. After `window.wait_ms` the window is placed anyway, so raise that for a slow start.
+
 Template variables: `$SEAT` (0..7), `$PLAYER` (name), `$PLAYERS` (how many players this session has, the same for every seat), `$WIDTH` `$HEIGHT` `$X` `$Y` (region in desktop pixels), `$GAMEDIR`
 (this copy's folder), `$NITROX` (recipe-specific paths resolved by the runner), `$STEAMID` (goldberg), `$USERPROFILE`
 `$DOCUMENTS` `$APPDATA` `$LOCALAPPDATA` (folders of this PC), the recipe's `vars` and `find` names, and every option name. A `find` entry may have a `hint`: what the player does when it is not found, shown as a setup step in the Library and as the error when a session starts without it.

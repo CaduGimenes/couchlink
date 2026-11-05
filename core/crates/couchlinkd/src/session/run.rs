@@ -721,10 +721,14 @@ impl Run {
             if follow.is_none() || self.seats[idx].window_pid.is_some() {
                 let root = self.seats[idx].window_pid.unwrap_or(pid);
                 let rect = self.seats[idx].plan.rect;
-                match self.placer.place(self.seats[idx].plan.seat, root, rect, recipe.window.borderless) {
-                    Ok(true) => break,
-                    Ok(false) => {}
-                    Err(e) => return Err(self.seat_failed(idx, Step::Place, e)),
+                let waiting = Instant::now() < deadline
+                    && recipe.window.place_after.as_ref().is_some_and(|after| !place_after_met(after, &self.seats[idx].dir, self.seats[idx].launched_at));
+                if !waiting {
+                    match self.placer.place(self.seats[idx].plan.seat, root, rect, recipe.window.borderless) {
+                        Ok(true) => break,
+                        Ok(false) => {}
+                        Err(e) => return Err(self.seat_failed(idx, Step::Place, e)),
+                    }
                 }
             }
             if Instant::now() >= deadline {
@@ -1089,4 +1093,41 @@ fn input_modules(pid: u32) -> Vec<String> {
 #[cfg(not(windows))]
 fn input_modules(_pid: u32) -> Vec<String> {
     Vec::new()
+}
+
+/// `window.place_after`: the file is there, was written since the copy started (not left by an earlier run), and has the
+/// text in it when one is asked for.
+fn place_after_met(after: &couchlink_core::recipe::PlaceAfter, dir: &Path, since: SystemTime) -> bool {
+    let path = dir.join(&after.file);
+    let Ok(modified) = std::fs::metadata(&path).and_then(|m| m.modified()) else { return false };
+    // File times can be up to two seconds off on some drives.
+    if modified + Duration::from_secs(2) < since {
+        return false;
+    }
+    match &after.contains {
+        None => true,
+        Some(text) => std::fs::read(&path).is_ok_and(|bytes| String::from_utf8_lossy(&bytes).contains(text.as_str())),
+    }
+}
+
+#[cfg(test)]
+mod place_after_tests {
+    use super::*;
+    use couchlink_core::recipe::PlaceAfter;
+
+    #[test]
+    fn it_waits_for_the_file_and_its_text_and_ignores_an_earlier_runs_file() {
+        let dir = std::env::temp_dir().join(format!("cl-place-after-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let after = PlaceAfter { file: "mod.log".into(), contains: Some("Render frame: 1".into()) };
+        let now = SystemTime::now();
+        assert!(!place_after_met(&after, &dir, now), "no file yet");
+        std::fs::write(dir.join("mod.log"), "Loading").unwrap();
+        assert!(!place_after_met(&after, &dir, now), "not the text yet");
+        std::fs::write(dir.join("mod.log"), "Loading\nRender frame: 1\n").unwrap();
+        assert!(place_after_met(&after, &dir, now));
+        assert!(place_after_met(&PlaceAfter { file: "mod.log".into(), contains: None }, &dir, now), "the file alone can be enough");
+        assert!(!place_after_met(&after, &dir, now + Duration::from_secs(60)), "written before this copy started");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

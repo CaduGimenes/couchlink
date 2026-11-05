@@ -216,7 +216,20 @@ fn link_error(e: io::Error, src: &Path, dst: &Path, src_root: &Path, dst_root: &
     if matches!(e.raw_os_error(), Some(17) | Some(18)) && e.kind() != io::ErrorKind::AlreadyExists {
         return different_volumes(src_root, dst_root);
     }
+    // ERROR_INVALID_FUNCTION: the drive cannot make hardlinks at all (exFAT, FAT32). On Unix 1 means something else.
+    if cfg!(windows) && e.raw_os_error() == Some(1) {
+        return no_hardlinks(dst_root);
+    }
     format!("cannot link {} to {}: {e}", src.display(), dst.display())
+}
+
+fn no_hardlinks(copies: &Path) -> String {
+    format!(
+        "the drive of Couchlink's copy folder ({}) cannot make hardlinks, which is how copies are made: it is probably exFAT or \
+         FAT32. Copies need an NTFS drive. Install or move the game to one, or move Couchlink's state folder to one that also \
+         holds the game (set COUCHLINK_STATE_DIR)",
+        copies.display()
+    )
 }
 
 fn different_volumes(game: &Path, copies: &Path) -> String {
@@ -319,6 +332,11 @@ mod tests {
         // Linked files share their bytes with the original: a write through one shows in the other.
         std::fs::write(game.join("game.exe"), "exe v2").unwrap();
         assert_eq!(read(&seat.join("game.exe")), "exe v2", "hardlinks, not copies");
+        #[cfg(windows)]
+        {
+            let msg = link_error(io::Error::from_raw_os_error(1), &seat, &seat, &seat, &seat);
+            assert!(msg.contains("NTFS"), "{msg}");
+        }
         // Copied files do not.
         std::fs::write(seat.join("config/settings.ini"), "volume=9").unwrap();
         assert_eq!(read(&game.join("config/settings.ini")), "volume=5");
