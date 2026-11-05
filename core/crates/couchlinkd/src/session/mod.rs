@@ -502,7 +502,7 @@ mod tests {
         assert!(id.starts_with("try-"), "it plays as a Try it game: {id}");
         let (again, added_again) = cfg.find_or_add_game(None, Some(&exe)).unwrap();
         assert_eq!((again.as_str(), added_again), (id.as_str(), false), "the second time it is known");
-        let missing = game.join("Gone.exe").display().to_string();
+        let missing = temp("play-new-elsewhere").join("Gone.exe").display().to_string();
         assert!(cfg.find_or_add_game(None, Some(&missing)).is_err(), "a program that is not there is not added");
     }
 
