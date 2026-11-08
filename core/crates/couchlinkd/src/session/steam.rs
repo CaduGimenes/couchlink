@@ -181,7 +181,7 @@ fn own_account(ctx: &PrepareCtx) -> Result<SeatPrep, String> {
         std::thread::sleep(std::time::Duration::from_secs(5));
     }
     let mut prep = SeatPrep::default();
-    prep.env.insert("steam_master_ipc_name_override".to_string(), cfg.ipc_name());
+    prep.env.insert("steam_master_ipc_name_override".to_string(), cfg.ipc_override());
     prep.run_as = Some(cfg);
     Ok(prep)
 }

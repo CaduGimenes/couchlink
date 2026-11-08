@@ -10,12 +10,16 @@
 
 use super::{AccountsConfig, LaunchedAs};
 use crate::error::{Result, SteamError};
+use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 /// Marks a seat home that Couchlink set up.
 const MARKER: &str = ".couchlink-steam-seat";
+
+/// Holds the seat's Steam IPC address (see [`ipc_address`]).
+const IPC_FILE: &str = ".couchlink-steam-ipc";
 
 fn data_home() -> PathBuf {
     match std::env::var_os("XDG_DATA_HOME").filter(|d| !d.is_empty()) {
@@ -49,15 +53,55 @@ pub fn ready(cfg: &AccountsConfig) -> bool {
     seat_home(cfg).join(MARKER).is_file()
 }
 
-/// The process id of the seat's Steam while it runs (Steam writes it to `~/.steam/steam.pid`).
+/// The process id of the seat's Steam while it runs. Steam writes it to `~/.steam/steam.pid`, but not when it is
+/// started with `-master_ipc_name_override`, as a seat's Steam always is; so the client is also looked for among the
+/// running processes, by its program: the seat install's `ubuntu12_32/steam`.
 fn steam_pid(cfg: &AccountsConfig) -> Option<u32> {
-    let pid: u32 = std::fs::read_to_string(seat_home(cfg).join(".steam").join("steam.pid")).ok()?.trim().parse().ok()?;
-    let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
-    comm.to_lowercase().contains("steam").then_some(pid)
+    let home = seat_home(cfg);
+    let from_file = std::fs::read_to_string(home.join(".steam").join("steam.pid"))
+        .ok()
+        .and_then(|t| t.trim().parse::<u32>().ok())
+        .filter(|pid| std::fs::read_to_string(format!("/proc/{pid}/comm")).is_ok_and(|c| c.to_lowercase().contains("steam")));
+    from_file.or_else(|| client_pid(Path::new("/proc"), &steam_dir(&home).join("ubuntu12_32").join("steam")))
+}
+
+/// The process under `proc` (a procfs) whose program, the first word of its command line, is `client`.
+fn client_pid(proc: &Path, client: &Path) -> Option<u32> {
+    let want = client.as_os_str().as_encoded_bytes();
+    std::fs::read_dir(proc).ok()?.flatten().find_map(|e| {
+        let pid: u32 = e.file_name().to_str()?.parse().ok()?;
+        let cmdline = std::fs::read(e.path().join("cmdline")).ok()?;
+        (cmdline.split(|b| *b == 0).next()? == want).then_some(pid)
+    })
 }
 
 pub fn steam_running(cfg: &AccountsConfig) -> bool {
     steam_pid(cfg).is_some()
+}
+
+/// The address the seat's Steam serves its IPC on. Linux Steam reads `-master_ipc_name_override` as `address:port`: a
+/// bare name trips an assertion in `BSetIpPortFromName` and the client crashes on start. So each seat gets a loopback
+/// port of its own, picked by the system (the desktop's Steam keeps its default one), and kept in the seat home, so
+/// the seat's Steam and the game copies started later agree on it.
+pub fn ipc_address(cfg: &AccountsConfig) -> String {
+    ipc_address_in(&seat_home(cfg), steam_running(cfg)).unwrap_or_else(|| cfg.ipc_name())
+}
+
+/// The kept address while the seat's Steam runs (it holds the port) or while the port is free; otherwise a new free
+/// one, kept for next time. `None` when no loopback port can be had at all.
+fn ipc_address_in(home: &Path, running: bool) -> Option<String> {
+    let file = home.join(IPC_FILE);
+    let kept = std::fs::read_to_string(&file)
+        .ok()
+        .and_then(|t| t.trim().parse::<SocketAddrV4>().ok())
+        .filter(|a| a.ip().is_loopback() && a.port() != 0);
+    if let Some(addr) = kept.filter(|a| running || TcpListener::bind(*a).is_ok()) {
+        return Some(addr.to_string());
+    }
+    let addr = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).and_then(|l| l.local_addr()).ok()?.to_string();
+    let _ = std::fs::create_dir_all(home);
+    let _ = std::fs::write(&file, &addr);
+    Some(addr)
 }
 
 /// Asks the seat's Steam to quit: SIGTERM, which Steam answers as its Exit menu does.
@@ -109,9 +153,9 @@ fn seat_steam_sh(dir: &Path, bootstraps: &[PathBuf]) -> Result<PathBuf> {
     Ok(sh)
 }
 
-/// The seat's Steam command: its own `steam.sh` with the seat's IPC name, nothing that puts it in Deck mode.
-fn steam_line(sh: &Path, cfg: &AccountsConfig) -> (PathBuf, Vec<String>) {
-    (sh.to_path_buf(), vec!["-master_ipc_name_override".into(), cfg.ipc_name()])
+/// The seat's Steam command: its own `steam.sh` with the seat's IPC address, nothing that puts it in Deck mode.
+fn steam_line(sh: &Path, ipc: &str) -> (PathBuf, Vec<String>) {
+    (sh.to_path_buf(), vec!["-master_ipc_name_override".into(), ipc.to_string()])
 }
 
 /// `start_steam`, with the seat's Steam's own output (and the command) in `log`.
@@ -119,7 +163,8 @@ pub fn start_steam_logged(cfg: &AccountsConfig, log: Option<&Path>) -> Result<u3
     let home = seat_home(cfg);
     let dir = steam_dir(&home);
     let sh = seat_steam_sh(&dir, &BOOTSTRAPS.map(PathBuf::from))?;
-    let (program, args) = steam_line(&sh, cfg);
+    let ipc = ipc_address(cfg);
+    let (program, args) = steam_line(&sh, &ipc);
     let (out, err) = match log.and_then(|p| {
         use std::io::Write;
         let _ = std::fs::create_dir_all(p.parent()?);
@@ -131,7 +176,7 @@ pub fn start_steam_logged(cfg: &AccountsConfig, log: Option<&Path>) -> Result<u3
         None => (Stdio::null(), Stdio::null()),
     };
     let mut cmd = Command::new(&program);
-    cmd.args(&args).envs(seat_env(&home, cfg));
+    cmd.args(&args).envs(seat_env(&home, cfg, &ipc));
     // Couchlink itself may run as a game of the desktop's Steam: none of that Steam's game environment (its overlay,
     // its runtime's libraries, the game's ids, Deck mode) is for this one.
     for (name, _) in std::env::vars_os() {
@@ -160,12 +205,12 @@ pub fn start_steam_logged(cfg: &AccountsConfig, log: Option<&Path>) -> Result<u3
 /// The seat's Steam's own home, with the XDG folders inside it (a desktop that sets them would otherwise point the
 /// seat's Steam at the desktop Steam's config and cache) and a user name of its own, as a second client on one Linux
 /// user is started by hand (`HOME=... USER=... steam`).
-fn seat_env(home: &Path, cfg: &AccountsConfig) -> Vec<(String, String)> {
+fn seat_env(home: &Path, cfg: &AccountsConfig, ipc: &str) -> Vec<(String, String)> {
     let user = format!("couchlink-seat{}", cfg.seat as u32 + 1);
     let mut env = vec![("HOME".to_string(), home.display().to_string()), ("USER".to_string(), user.clone()), ("LOGNAME".to_string(), user)];
-    // The IPC name in the environment too, not only on Steam's command line: the processes Steam starts (its web
+    // The IPC address in the environment too, not only on Steam's command line: the processes Steam starts (its web
     // helper) read it from there, and without it would talk to the desktop's Steam.
-    env.push(("steam_master_ipc_name_override".to_string(), cfg.ipc_name()));
+    env.push(("steam_master_ipc_name_override".to_string(), ipc.to_string()));
     for (var, sub) in [("XDG_CONFIG_HOME", ".config"), ("XDG_DATA_HOME", ".local/share"), ("XDG_STATE_HOME", ".local/state"), ("XDG_CACHE_HOME", ".cache")] {
         env.push((var.to_string(), home.join(sub).display().to_string()));
     }
@@ -245,16 +290,16 @@ mod tests {
         assert_eq!(seat_steam_sh(&dir, &[]).unwrap(), sh, "and used as it is after that");
 
         let cfg = AccountsConfig { seat: 1, steam_exe: "/usr/bin/steam".into(), library_dirs: vec![] };
-        let (program, args) = steam_line(&sh, &cfg);
+        let (program, args) = steam_line(&sh, "127.0.0.1:40123");
         assert_eq!(program.file_name().unwrap(), "steam.sh");
         assert_ne!(program, cfg.steam_exe, "not the wrapper on PATH");
-        assert_eq!(args, ["-master_ipc_name_override", "couchlink_seat2"]);
+        assert_eq!(args, ["-master_ipc_name_override", "127.0.0.1:40123"]);
         assert!(!args.iter().any(|a| a == "-steamdeck" || a == "-gamepadui"));
-        let env: std::collections::BTreeMap<_, _> = seat_env(Path::new("/h/seat2"), &cfg).into_iter().collect();
+        let env: std::collections::BTreeMap<_, _> = seat_env(Path::new("/h/seat2"), &cfg, "127.0.0.1:40123").into_iter().collect();
         assert_eq!(env["HOME"], "/h/seat2");
         assert_eq!(env["XDG_DATA_HOME"], "/h/seat2/.local/share", "never the desktop's own XDG folders");
         assert_eq!(env["USER"], "couchlink-seat2");
-        assert_eq!(env["steam_master_ipc_name_override"], "couchlink_seat2", "Steam's own helpers find the seat's Steam too");
+        assert_eq!(env["steam_master_ipc_name_override"], "127.0.0.1:40123", "Steam's own helpers find the seat's Steam too");
         for name in ["SteamAppId", "LD_PRELOAD", "LD_LIBRARY_PATH", "SteamDeck", "STEAM_COMPAT_DATA_PATH", "PRESSURE_VESSEL_FILESYSTEMS_RO"] {
             assert!(foreign_steam_env(name), "{name} is the desktop Steam's");
         }
@@ -262,5 +307,48 @@ mod tests {
             assert!(!foreign_steam_env(name), "{name} stays");
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_seats_steam_is_found_by_its_program_without_a_pid_file() {
+        let proc = std::env::temp_dir().join(format!("couchlink-seat-proc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&proc);
+        let client = Path::new("/h/seat2/.local/share/Steam/ubuntu12_32/steam");
+        for (pid, cmdline) in [
+            ("100", &b"/home/p/.local/share/Steam/ubuntu12_32/steam\0-srt-logger-opened\0"[..]),
+            ("200", b"/h/seat2/.local/share/Steam/ubuntu12_32/steam-runtime/x\0"),
+            ("300", b"/h/seat2/.local/share/Steam/ubuntu12_32/steam\0-master_ipc_name_override\x00127.0.0.1:40123\0"),
+        ] {
+            std::fs::create_dir_all(proc.join(pid)).unwrap();
+            std::fs::write(proc.join(pid).join("cmdline"), cmdline).unwrap();
+        }
+        std::fs::create_dir_all(proc.join("self")).unwrap();
+        assert_eq!(client_pid(&proc, client), Some(300), "the seat's client, not the desktop's or a helper of it");
+        std::fs::remove_dir_all(proc.join("300")).unwrap();
+        assert_eq!(client_pid(&proc, client), None);
+        let _ = std::fs::remove_dir_all(&proc);
+    }
+
+    #[test]
+    fn a_seats_steam_ipc_is_a_loopback_port_of_its_own_and_kept() {
+        let home = std::env::temp_dir().join(format!("couchlink-seat-ipc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let first = ipc_address_in(&home, false).unwrap();
+        let addr: SocketAddrV4 = first.parse().expect("Linux Steam takes address:port, never a bare name");
+        assert!(addr.ip().is_loopback() && addr.port() != 0);
+        assert_eq!(std::fs::read_to_string(home.join(IPC_FILE)).unwrap(), first, "kept in the seat home");
+        assert_eq!(ipc_address_in(&home, false).unwrap(), first, "the same port while it is free");
+
+        // Something else took the port while the seat's Steam was not running: a new one.
+        let taken = TcpListener::bind(addr).unwrap();
+        assert_eq!(ipc_address_in(&home, true).unwrap(), first, "a running Steam holds its port, so it stays");
+        let second = ipc_address_in(&home, false).unwrap();
+        assert_ne!(second, first);
+        assert_eq!(std::fs::read_to_string(home.join(IPC_FILE)).unwrap(), second);
+        drop(taken);
+
+        std::fs::write(home.join(IPC_FILE), "couchlink_seat2").unwrap();
+        assert!(ipc_address_in(&home, false).unwrap().parse::<SocketAddrV4>().is_ok(), "an unusable kept value is replaced");
+        let _ = std::fs::remove_dir_all(&home);
     }
 }
