@@ -185,12 +185,10 @@ pub fn copy_line(spec: &LaunchSpec, seat: &LinuxSeat, tools: &Tools, pad_paths: 
         line.push(program.display().to_string());
         line.extend(args);
         umu = through_umu;
-        if let Some(home) = &steam_home {
-            // umu keeps its runtime under the user's data folder, shared by every seat.
-            let data = std::env::var("XDG_DATA_HOME").ok().filter(|d| !d.is_empty()).unwrap_or_else(|| format!("{}/.local/share", std::env::var("HOME").unwrap_or_default()));
-            env.insert("XDG_DATA_HOME".into(), data);
-            env.insert("HOME".into(), home.display().to_string());
-        }
+        // A Proton copy keeps the user's home even on a seat with its own Steam: `steam_master_ipc_name_override`
+        // already points its steamclient at that seat's Steam, and with the seat's home Proton could not load the
+        // game's `steamclient64.dll` for older Steamworks builds (`SteamAPI_Init` failed with c0000135), so the game
+        // quit on start. The copy's saves are its own anyway: they live in the seat's Wine prefix.
     } else if let Some(home) = &steam_home {
         env.insert("HOME".into(), home.display().to_string());
     } else {
