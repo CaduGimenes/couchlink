@@ -446,6 +446,20 @@ mod tests {
     }
 
     #[test]
+    fn a_proton_copy_on_a_seat_with_its_own_steam_keeps_the_users_home() {
+        let own = LaunchSpec {
+            run_as: Some(couchlink_steam::AccountsConfig { seat: 1, steam_exe: "/usr/bin/steam".into(), library_dirs: vec![] }),
+            ..spec("/state/instances/x/1/Game.exe")
+        };
+        let l = copy_line(&own, &seat(LinuxOpts::default()), &tools(), &[], Sandbox::Bwrap).unwrap();
+        assert!(!l.env.contains_key("HOME") && !l.env.contains_key("XDG_DATA_HOME"), "inherited, never the seat's Steam home: {:?}", l.env);
+        // A native copy on that seat still runs with that Steam's home.
+        let native = LaunchSpec { exe: "/state/instances/x/1/game.x86_64".into(), ..own };
+        let l = copy_line(&native, &seat(LinuxOpts::default()), &tools(), &[], Sandbox::Bwrap).unwrap();
+        assert!(l.env["HOME"].ends_with("couchlink/steam-seat-2"), "{}", l.env["HOME"]);
+    }
+
+    #[test]
     fn gamescope_holds_the_copy_to_the_fps_limit() {
         let s = LinuxSeat { fps_limit: Some(30), ..seat(LinuxOpts::default()) };
         let l = copy_line(&spec("/g/Game.exe"), &s, &tools(), &[], Sandbox::Bwrap).unwrap();
