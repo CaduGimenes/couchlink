@@ -67,7 +67,8 @@ fn steam_pid(cfg: &AccountsConfig) -> Option<u32> {
 }
 
 /// The process under `proc` (a procfs) whose program, the first word of its command line, is `client`. The same file
-/// under another spelling of its path (a symlinked or `..` folder on the way) counts too.
+/// under another spelling of its path (a symlinked or `..` folder on the way, or a path relative to the process's
+/// working folder) counts too.
 fn client_pid(proc: &Path, client: &Path) -> Option<u32> {
     let want = client.as_os_str().as_encoded_bytes();
     let real = std::fs::canonicalize(client).ok();
@@ -78,7 +79,14 @@ fn client_pid(proc: &Path, client: &Path) -> Option<u32> {
         let same = program == want
             || real.as_ref().is_some_and(|real| {
                 let program = Path::new(std::ffi::OsStr::from_bytes(program));
-                program.is_absolute() && program.ends_with("ubuntu12_32/steam") && std::fs::canonicalize(program).is_ok_and(|p| &p == real)
+                let program = match program.is_absolute() {
+                    true => program.to_path_buf(),
+                    false => match std::fs::read_link(e.path().join("cwd")) {
+                        Ok(cwd) => cwd.join(program),
+                        Err(_) => return false,
+                    },
+                };
+                program.ends_with("ubuntu12_32/steam") && std::fs::canonicalize(&program).is_ok_and(|p| &p == real)
             });
         same.then_some(pid)
     })
@@ -88,50 +96,122 @@ pub fn steam_running(cfg: &AccountsConfig) -> bool {
     steam_pid(cfg).is_some()
 }
 
+/// The seat's Steam client as [`ipc_address_in`] sees it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Client {
+    Stopped,
+    /// Running, with the address on its command line when one could be read there.
+    Running(Option<SocketAddrV4>),
+}
+
+fn client(cfg: &AccountsConfig) -> Client {
+    match steam_pid(cfg) {
+        Some(pid) => Client::Running(client_ipc(Path::new("/proc"), pid)),
+        None => Client::Stopped,
+    }
+}
+
+/// The address a running client was started with: its `-master_ipc_name_override` argument (`steam.sh` passes its
+/// arguments on to the client).
+fn client_ipc(proc: &Path, pid: u32) -> Option<SocketAddrV4> {
+    let cmdline = std::fs::read(proc.join(pid.to_string()).join("cmdline")).ok()?;
+    let mut args = cmdline.split(|b| *b == 0);
+    args.find(|a| *a == b"-master_ipc_name_override")?;
+    std::str::from_utf8(args.next()?).ok()?.parse().ok()
+}
+
 /// The address the seat's Steam serves its IPC on. Linux Steam reads `-master_ipc_name_override` as `address:port`: a
 /// bare name trips an assertion in `BSetIpPortFromName` and the client crashes on start. So each seat gets a loopback
 /// port of its own, picked by the system (the desktop's Steam keeps its default one), and kept in the seat home, so
 /// the seat's Steam and the game copies started later agree on it.
 pub fn ipc_address(cfg: &AccountsConfig) -> Result<String> {
-    ipc_address_in(&seat_home(cfg), steam_running(cfg))
+    ipc_address_in(&seat_home(cfg), client(cfg))
 }
 
-/// The kept address while the seat's Steam runs (it holds the port) or while the port is free; otherwise a new free
-/// one, kept for next time. The file stays locked from reading to writing, so two callers at once agree on one
-/// address. An error when no loopback port can be had or the address cannot be kept: a seat's Steam started without a
-/// usable address crashes, and one whose address is not kept would not be found by its game.
-fn ipc_address_in(home: &Path, running: bool) -> Result<String> {
-    use std::io::{Read, Seek, Write};
+/// Locks the choice of every seat's address (next to the seat homes), so that callers at once, for one seat or for
+/// several, agree on one address per seat and never give two seats the same one.
+const IPC_LOCK: &str = ".couchlink-steam-ipc.lock";
+
+/// The seat's address:
+/// - while its Steam runs, the one that Steam was started with (from its command line, else the kept one); a running
+///   Steam whose address is not known at all is an error, since a game given another address would not reach it;
+/// - while it is stopped, the kept one if that port is free and no other seat keeps it, else a new free port.
+///
+/// The address is kept in the seat home before it is returned. An error when no loopback port can be had or the
+/// address cannot be kept: a seat's Steam started without a usable address crashes, and one whose address is not
+/// kept would not be found by its game.
+fn ipc_address_in(home: &Path, client: Client) -> Result<String> {
     use std::os::fd::AsRawFd;
-    let path = home.join(IPC_FILE);
     std::fs::create_dir_all(home).map_err(|e| SteamError::io(format!("create {}", home.display()), e))?;
-    let mut file = std::fs::OpenOptions::new()
-        .read(true)
+    let seats = home.parent().unwrap_or(home);
+    let lock_path = seats.join(IPC_LOCK);
+    let lock = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(false)
-        .open(&path)
-        .map_err(|e| SteamError::io(format!("open {}", path.display()), e))?;
+        .open(&lock_path)
+        .map_err(|e| SteamError::io(format!("open {}", lock_path.display()), e))?;
     // SAFETY: flock is a plain system call on a descriptor this function owns; the lock goes with the file.
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
-        return Err(SteamError::io(format!("lock {}", path.display()), std::io::Error::last_os_error()));
+    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        return Err(SteamError::io(format!("lock {}", lock_path.display()), std::io::Error::last_os_error()));
     }
+    let path = home.join(IPC_FILE);
+    let kept = kept_ipc(&path);
+    let addr = match client {
+        Client::Running(Some(addr)) => addr,
+        Client::Running(None) => kept.ok_or_else(|| {
+            SteamError::Unsupported("this seat's Steam is running, but not with an address Couchlink knows: close that Steam and try again".into())
+        })?,
+        Client::Stopped => {
+            let others = other_seats_ipc(seats, home);
+            match kept.filter(|a| !others.contains(a) && TcpListener::bind(*a).is_ok()) {
+                Some(addr) => addr,
+                None => free_ipc(&others)?,
+            }
+        }
+    };
+    if kept != Some(addr) {
+        keep_ipc(&path, addr)?;
+    }
+    Ok(addr.to_string())
+}
+
+/// The address kept at `path`, when it holds a usable one. Reads no more than an address can take.
+fn kept_ipc(path: &Path) -> Option<SocketAddrV4> {
+    use std::io::Read;
     let mut text = String::new();
-    let _ = file.read_to_string(&mut text);
-    let kept = text.trim().parse::<SocketAddrV4>().ok().filter(|a| a.ip().is_loopback() && a.port() != 0);
-    if let Some(addr) = kept.filter(|a| running || TcpListener::bind(*a).is_ok()) {
-        return Ok(addr.to_string());
+    std::fs::File::open(path).ok()?.take(64).read_to_string(&mut text).ok()?;
+    text.trim().parse::<SocketAddrV4>().ok().filter(|a| a.ip().is_loopback() && a.port() != 0)
+}
+
+/// The addresses the other seats in `seats` keep.
+fn other_seats_ipc(seats: &Path, home: &Path) -> Vec<SocketAddrV4> {
+    let Ok(dirs) = std::fs::read_dir(seats) else { return Vec::new() };
+    dirs.flatten()
+        .map(|e| e.path())
+        .filter(|d| d.as_path() != home && d.file_name().is_some_and(|n| n.to_string_lossy().starts_with("steam-seat-")))
+        .filter_map(|d| kept_ipc(&d.join(IPC_FILE)))
+        .collect()
+}
+
+/// A loopback port free now that no seat in `others` keeps.
+fn free_ipc(others: &[SocketAddrV4]) -> Result<SocketAddrV4> {
+    let mut last = std::io::Error::other("every port the system offered is another seat's");
+    for _ in 0..16 {
+        match TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).and_then(|l| l.local_addr()) {
+            Ok(std::net::SocketAddr::V4(addr)) if !others.contains(&addr) => return Ok(addr),
+            Ok(_) => {}
+            Err(e) => last = e,
+        }
     }
-    let addr = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
-        .and_then(|l| l.local_addr())
-        .map_err(|e| SteamError::io("find a free loopback port for the seat's Steam", e))?
-        .to_string();
-    file.set_len(0)
-        .and_then(|()| file.rewind())
-        .and_then(|()| file.write_all(addr.as_bytes()))
-        .and_then(|()| file.sync_all())
-        .map_err(|e| SteamError::io(format!("write {}", path.display()), e))?;
-    Ok(addr)
+    Err(SteamError::io("find a free loopback port for the seat's Steam", last))
+}
+
+fn keep_ipc(path: &Path, addr: SocketAddrV4) -> Result<()> {
+    use std::io::Write;
+    std::fs::File::create(path)
+        .and_then(|mut f| f.write_all(addr.to_string().as_bytes()).and_then(|()| f.sync_all()))
+        .map_err(|e| SteamError::io(format!("write {}", path.display()), e))
 }
 
 /// Asks the seat's Steam to quit: SIGTERM, which Steam answers as its Exit menu does.
@@ -379,55 +459,147 @@ mod tests {
     }
 
     #[test]
-    fn callers_at_once_agree_on_one_seat_address() {
-        let home = std::env::temp_dir().join(format!("couchlink-seat-ipc-race-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
-        let first = ipc_address_in(&home, false).unwrap();
-        // The kept port is taken, so every caller would pick a new one; the lock makes the first choice stick.
-        let _taken = TcpListener::bind(first.parse::<SocketAddrV4>().unwrap()).unwrap();
-        let picked: Vec<String> = (0..8)
-            .map(|_| {
-                let home = home.clone();
-                std::thread::spawn(move || ipc_address_in(&home, false).unwrap())
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .map(|t| t.join().unwrap())
-            .collect();
-        let kept = std::fs::read_to_string(home.join(IPC_FILE)).unwrap();
-        assert_ne!(kept, first);
-        assert!(picked.iter().all(|a| *a == kept), "{picked:?} all {kept}");
-        let _ = std::fs::remove_dir_all(&home);
+    fn a_seats_steam_found_by_a_relative_program_path() {
+        let root = std::env::temp_dir().join(format!("couchlink-seat-rel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let steam = root.join("Steam");
+        std::fs::create_dir_all(steam.join("ubuntu12_32")).unwrap();
+        std::fs::write(steam.join("ubuntu12_32").join("steam"), "").unwrap();
+        let proc = root.join("proc");
+        std::fs::create_dir_all(proc.join("500")).unwrap();
+        std::fs::write(proc.join("500").join("cmdline"), b"./ubuntu12_32/steam\0").unwrap();
+        std::os::unix::fs::symlink(&steam, proc.join("500").join("cwd")).unwrap();
+        assert_eq!(client_pid(&proc, &steam.join("ubuntu12_32").join("steam")), Some(500), "relative to its working folder");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn an_address_that_cannot_be_kept_is_an_error() {
-        let file = std::env::temp_dir().join(format!("couchlink-seat-ipc-file-{}", std::process::id()));
-        std::fs::write(&file, "").unwrap();
-        assert!(ipc_address_in(&file.join("home"), false).is_err(), "never an address the game would not find");
-        let _ = std::fs::remove_file(&file);
+    fn a_running_clients_address_is_read_from_its_command_line() {
+        let proc = std::env::temp_dir().join(format!("couchlink-seat-cmdline-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&proc);
+        std::fs::create_dir_all(proc.join("300")).unwrap();
+        std::fs::write(proc.join("300").join("cmdline"), b"/h/Steam/ubuntu12_32/steam\0-master_ipc_name_override\x00127.0.0.1:40123\0-silent\0").unwrap();
+        assert_eq!(client_ipc(&proc, 300), Some("127.0.0.1:40123".parse().unwrap()));
+        std::fs::write(proc.join("300").join("cmdline"), b"/h/Steam/ubuntu12_32/steam\0-silent\0").unwrap();
+        assert_eq!(client_ipc(&proc, 300), None);
+        let _ = std::fs::remove_dir_all(&proc);
+    }
+
+    /// A folder of seat homes for one test.
+    fn seats(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("couchlink-seats-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        root
     }
 
     #[test]
     fn a_seats_steam_ipc_is_a_loopback_port_of_its_own_and_kept() {
-        let home = std::env::temp_dir().join(format!("couchlink-seat-ipc-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
-        let first = ipc_address_in(&home, false).unwrap();
+        let root = seats("kept");
+        let home = root.join("steam-seat-2");
+        let first = ipc_address_in(&home, Client::Stopped).unwrap();
         let addr: SocketAddrV4 = first.parse().expect("Linux Steam takes address:port, never a bare name");
         assert!(addr.ip().is_loopback() && addr.port() != 0);
         assert_eq!(std::fs::read_to_string(home.join(IPC_FILE)).unwrap(), first, "kept in the seat home");
-        assert_eq!(ipc_address_in(&home, false).unwrap(), first, "the same port while it is free");
+        assert_eq!(ipc_address_in(&home, Client::Stopped).unwrap(), first, "the same port while it is free");
 
         // Something else took the port while the seat's Steam was not running: a new one.
         let taken = TcpListener::bind(addr).unwrap();
-        assert_eq!(ipc_address_in(&home, true).unwrap(), first, "a running Steam holds its port, so it stays");
-        let second = ipc_address_in(&home, false).unwrap();
+        let second = ipc_address_in(&home, Client::Stopped).unwrap();
         assert_ne!(second, first);
         assert_eq!(std::fs::read_to_string(home.join(IPC_FILE)).unwrap(), second);
         drop(taken);
 
         std::fs::write(home.join(IPC_FILE), "couchlink_seat2").unwrap();
-        assert!(ipc_address_in(&home, false).unwrap().parse::<SocketAddrV4>().is_ok(), "an unusable kept value is replaced");
-        let _ = std::fs::remove_dir_all(&home);
+        assert!(ipc_address_in(&home, Client::Stopped).unwrap().parse::<SocketAddrV4>().is_ok(), "an unusable kept value is replaced");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_running_steam_keeps_the_address_it_was_started_with() {
+        let root = seats("running");
+        let home = root.join("steam-seat-2");
+        let kept = ipc_address_in(&home, Client::Stopped).unwrap();
+        // Its own port is busy (it holds it): still that one.
+        let _held = TcpListener::bind(kept.parse::<SocketAddrV4>().unwrap()).unwrap();
+        assert_eq!(ipc_address_in(&home, Client::Running(None)).unwrap(), kept);
+        // Started with another address (the kept one was lost or changed): that Steam's address wins and is kept.
+        let its: SocketAddrV4 = "127.0.0.1:40999".parse().unwrap();
+        assert_eq!(ipc_address_in(&home, Client::Running(Some(its))).unwrap(), its.to_string());
+        assert_eq!(std::fs::read_to_string(home.join(IPC_FILE)).unwrap(), its.to_string());
+        // Running with no address known anywhere: an error, never a new address its games could not reach.
+        std::fs::remove_file(home.join(IPC_FILE)).unwrap();
+        assert!(ipc_address_in(&home, Client::Running(None)).is_err());
+        assert!(!home.join(IPC_FILE).exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_game_prepared_while_its_steam_starts_gets_that_steams_address() {
+        let root = seats("startup");
+        let home = root.join("steam-seat-2");
+        // The seat's Steam is being started with this address...
+        let started = ipc_address_in(&home, Client::Stopped).unwrap();
+        // ...a game prepared before that Steam shows up or binds its port gets the same one...
+        assert_eq!(ipc_address_in(&home, Client::Stopped).unwrap(), started);
+        // ...and so does one prepared after, while that Steam holds the port.
+        let addr: SocketAddrV4 = started.parse().unwrap();
+        let _steam = TcpListener::bind(addr).unwrap();
+        assert_eq!(ipc_address_in(&home, Client::Running(Some(addr))).unwrap(), started);
+        assert_eq!(ipc_address_in(&home, Client::Running(None)).unwrap(), started);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn two_seats_never_share_an_address() {
+        let root = seats("two");
+        let (two, three) = (root.join("steam-seat-2"), root.join("steam-seat-3"));
+        let a = ipc_address_in(&two, Client::Stopped).unwrap();
+        // Seat 3 kept the same port (say it was picked while seat 2's Steam had not bound it yet): it gets another.
+        std::fs::create_dir_all(&three).unwrap();
+        std::fs::write(three.join(IPC_FILE), &a).unwrap();
+        let b = ipc_address_in(&three, Client::Stopped).unwrap();
+        assert_ne!(a, b);
+        assert_eq!(ipc_address_in(&two, Client::Stopped).unwrap(), a);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn callers_at_once_agree_on_one_address_per_seat() {
+        let root = seats("race");
+        let homes: Vec<PathBuf> = (2..=4).map(|n| root.join(format!("steam-seat-{n}"))).collect();
+        let first = ipc_address_in(&homes[0], Client::Stopped).unwrap();
+        // The kept port is taken, so every caller for that seat would pick a new one; the lock makes the first stick.
+        let _taken = TcpListener::bind(first.parse::<SocketAddrV4>().unwrap()).unwrap();
+        let picked: Vec<(usize, String)> = (0..12)
+            .map(|i| {
+                let home = homes[i % 3].clone();
+                std::thread::spawn(move || (i % 3, ipc_address_in(&home, Client::Stopped).unwrap()))
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|t| t.join().unwrap())
+            .collect();
+        let kept: Vec<String> = homes.iter().map(|h| std::fs::read_to_string(h.join(IPC_FILE)).unwrap()).collect();
+        assert_ne!(kept[0], first);
+        assert!(picked.iter().all(|(seat, a)| *a == kept[*seat]), "{picked:?} {kept:?}");
+        assert!(kept[0] != kept[1] && kept[1] != kept[2] && kept[0] != kept[2], "{kept:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_address_that_cannot_be_kept_is_an_error() {
+        // The seat home cannot be made.
+        let file = std::env::temp_dir().join(format!("couchlink-seat-ipc-file-{}", std::process::id()));
+        std::fs::write(&file, "").unwrap();
+        assert!(ipc_address_in(&file.join("steam-seat-2"), Client::Stopped).is_err(), "never an address the game would not find");
+        let _ = std::fs::remove_file(&file);
+        // The home is there and the file opens, but writing the address fails (/dev/full: no space left).
+        let root = seats("full");
+        let home = root.join("steam-seat-2");
+        std::fs::create_dir_all(&home).unwrap();
+        std::os::unix::fs::symlink("/dev/full", home.join(IPC_FILE)).unwrap();
+        let e = ipc_address_in(&home, Client::Stopped).unwrap_err();
+        assert!(e.to_string().contains("write"), "{e}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

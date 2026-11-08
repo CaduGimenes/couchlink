@@ -225,7 +225,8 @@ desktop is needed; gamescope is recommended.
    that Steam (for Proton copies `XDG_DATA_HOME` stays the user's, so umu's runtime is shared). Linux Steam takes
    `-master_ipc_name_override` as `address:port` (a bare name crashes it on start), so each seat's Steam gets a free
    loopback port picked by the system and kept in its home (`.couchlink-steam-ipc`); its copy gets the same value in
-   `steam_master_ipc_name_override`. Such a Steam writes no `~/.steam/steam.pid`, so a seat's running Steam is found by
+   `steam_master_ipc_name_override`. The choice is made under a lock next to the seat homes, so no two seats get the
+   same port, and while a seat's Steam runs its address is the one on its command line. Such a Steam writes no `~/.steam/steam.pid`, so a seat's running Steam is found by
    its program (the seat install's `ubuntu12_32/steam`) among the processes. Setup and removal need no administrator
    rights.
 7. **Goldberg for native games** (`couchlink-steam/src/goldberg_linux.rs`): `libsteam_api.so` in the copy is replaced by
