@@ -44,11 +44,11 @@ impl AccountsConfig {
     }
     /// Value for `-master_ipc_name_override` and the `steam_master_ipc_name_override` variable on this system: the
     /// IPC name on Windows, an `address:port` on Linux (see `accounts_linux::ipc_address`).
-    pub fn ipc_override(&self) -> String {
+    pub fn ipc_override(&self) -> Result<String> {
         #[cfg(target_os = "linux")]
         return imp::ipc_address(self);
         #[cfg(not(target_os = "linux"))]
-        return self.ipc_name();
+        return Ok(self.ipc_name());
     }
     /// Windows Credential Manager target holding the helper user's password.
     pub fn credential_target(&self) -> String {
